@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Add copy/cut/paste functionality for nodes that works across workspaces (tabs). Uses localStorage as a clipboard to enable cross-tab browser persistence. Adds keyboard shortcuts (Ctrl+C, Ctrl+X, Ctrl+V) and context menu entries.",
+  "status": "completed",
+  "steps": [
+    "In src/App.jsx, add a selectedNodeId state (or reuse focusedNodeId) that tracks which node is currently selected for copy/cut operations. When a user clicks on a node header (the non-drag click case from FEAT-001), set this as the selected node.",
+    "Add a clipboard mechanism using localStorage key 'nexus-clipboard'. The clipboard stores: { node: <serialized node data>, action: 'copy' | 'cut', sourceWorkspaceId: <workspace id> }. Using localStorage enables cross-browser-tab clipboard sharing.",
+    "Implement copyNode(nodeId) function: serialize the node (deep clone, strip id), store in localStorage clipboard with action='copy'.",
+    "Implement cutNode(nodeId) function: serialize the node, store in localStorage clipboard with action='cut', and store the original nodeId and workspaceId so it can be removed on paste.",
+    "Implement pasteNode() function: read from localStorage clipboard. Create a new node with a new id (using nextId), place it at center of current viewport (using transform to calculate center coordinates). If action was 'cut', also remove the original node from its source workspace. After paste, clear the clipboard.",
+    "Add keyboard event handling in the existing keydown useEffect: (a) Ctrl+C when a node is selected -> copyNode, (b) Ctrl+X when a node is selected -> cutNode, (c) Ctrl+V -> pasteNode. Make sure these don't fire when user is typing in an INPUT or TEXTAREA.",
+    "Add 'Copy Node', 'Cut Node' entries to the node context menu (nodeContextMenu, rendered around line 2190). Add 'Paste Node' entry to the canvas background context menu (contextMenu, rendered around line 2165) - this should paste at the right-click location instead of center.",
+    "Import Scissors and Clipboard (or ClipboardPaste) icons from lucide-react for the new menu items."
+  ],
+  "acceptance_criteria": [
+    "Ctrl+C with a selected/focused node copies it to localStorage clipboard",
+    "Ctrl+X with a selected/focused node cuts it (marks for removal on paste)",
+    "Ctrl+V pastes the node from clipboard into the active workspace at canvas center",
+    "Pasting a cut node removes it from the source workspace",
+    "Right-click context menu on a node shows Copy and Cut options",
+    "Right-click context menu on canvas background shows Paste option (disabled/hidden if clipboard is empty)",
+    "Copying/pasting across different workspace tabs works correctly",
+    "npm run build succeeds without errors"
+  ],
+  "verification": [
+    "npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Implementation moved activeWs/nodes/edges/groups/updateActiveWorkspace declarations before clipboard functions to avoid temporal dead zone issues with const. Build passes successfully. Added Scissors and ClipboardPaste icon imports, copyNode/cutNode/pasteNode functions with localStorage persistence, Ctrl+C/X/V keyboard shortcuts, and context menu entries for both node and canvas menus."
+}
