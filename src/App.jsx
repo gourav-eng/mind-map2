@@ -2530,7 +2530,7 @@ export default function WorkflowApp() {
             })}
 
             {/* --- Connecting Dynamic Paths --- */}
-            <svg className="absolute overflow-visible w-full h-full z-0">
+            <svg className="absolute overflow-visible w-full h-full z-30">
               <defs>
                 {Object.entries(THEMES).map(([key, theme]) => (
                   <marker key={key} id={`arrow-${key}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
