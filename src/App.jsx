@@ -1650,11 +1650,19 @@ export default function WorkflowApp() {
           const innerN = updatedNodes.filter(n => n.groupId === sg.id);
           const innerS = updatedGroups.filter(g => g.parentGroupId === sg.id);
           let maxChildY = sgY + 160;
-          innerN.forEach(n => { maxChildY = Math.max(maxChildY, n.y + (n.expanded ? 280 : 120)); });
-          innerS.forEach(s => { maxChildY = Math.max(maxChildY, s.y + (s.height || 420)); });
+          let maxChildX = sgX + 400;
+          innerN.forEach(n => {
+            maxChildY = Math.max(maxChildY, n.y + (n.expanded ? 280 : 120));
+            maxChildX = Math.max(maxChildX, n.x + 340);
+          });
+          innerS.forEach(s => {
+            maxChildY = Math.max(maxChildY, s.y + (s.height || 420));
+            maxChildX = Math.max(maxChildX, s.x + (s.width || 440));
+          });
           
+          const computedWidth = Math.max(440, maxChildX - sgX + 40);
           currentY = maxChildY + 40;
-          return { ...sg, x: sgX, y: sgY, width: 440, height: Math.max(320, maxChildY - sgY + 20) };
+          return { ...sg, x: sgX, y: sgY, width: computedWidth, height: Math.max(320, maxChildY - sgY + 20) };
         }
         return sg;
       });
