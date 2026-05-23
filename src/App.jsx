@@ -489,6 +489,18 @@ export default function WorkflowApp() {
     setFocusedNodeId(null);
   }, [activeTab]);
 
+  // --- Auto-hide sidebar on small screens ---
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setShowSidebar(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
 
   // --- History Actions ---
   const updateHistory = useCallback((past, future) => {
@@ -1426,36 +1438,36 @@ export default function WorkflowApp() {
     <div className="flex flex-col h-screen w-full bg-[#f8fafc] font-sans text-slate-800 selection:bg-indigo-100 overflow-hidden">
       
       {/* --- Top Command Toolbar --- */}
-      <header className="h-16 bg-white border-b border-slate-200/80 flex items-center px-6 shadow-sm z-50 justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <header className="h-14 sm:h-16 bg-white border-b border-slate-200/80 flex items-center px-2 sm:px-4 md:px-6 shadow-sm z-50 justify-between shrink-0 gap-1 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
           <button 
             onClick={() => setShowSidebar(!showSidebar)}
-            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors shrink-0"
             title={showSidebar ? "Hide Dashboard" : "Show Dashboard"}
           >
             {showSidebar ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeft className="w-5 h-5" />}
           </button>
           
-          <div className="p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-xl text-white shadow-md shadow-indigo-100 shrink-0">
-            <Network className="w-5 h-5" />
+          <div className="p-2 sm:p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-lg sm:rounded-xl text-white shadow-md shadow-indigo-100 shrink-0">
+            <Network className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
 
           {/* Workspace Dropdown Selector */}
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 max-w-[200px] sm:max-w-[240px] md:max-w-[300px]">
             <button
               onClick={() => setShowWorkspaceDropdown(!showWorkspaceDropdown)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors min-w-[180px]"
+              className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors w-full"
             >
-              <span className="text-sm font-semibold text-slate-700 truncate flex-1 text-left">
+              <span className="text-xs sm:text-sm font-semibold text-slate-700 truncate flex-1 text-left">
                 {activeWs?.name || 'Select Workspace'}
               </span>
-              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showWorkspaceDropdown ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 transition-transform shrink-0 ${showWorkspaceDropdown ? 'rotate-180' : ''}`} />
             </button>
 
             {showWorkspaceDropdown && (
               <>
                 <div className="fixed inset-0 z-[99]" onClick={() => setShowWorkspaceDropdown(false)}></div>
-                <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100]">
+                <div className="absolute top-full left-0 mt-2 w-56 sm:w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-2rem)]">
                   {workspaces.map(ws => (
                     <button
                       key={ws.id}
@@ -1478,30 +1490,30 @@ export default function WorkflowApp() {
         </div>
 
 
-        <div className="relative flex items-center gap-1">
+        <div className="relative flex items-center gap-0.5 sm:gap-1 shrink-0">
           {/* Always-visible Undo/Redo buttons */}
-          <button onClick={performUndo} disabled={!canUndo} className={`p-2 rounded-lg transition-colors ${!canUndo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Undo">
-            <Undo2 className="w-5 h-5" />
+          <button onClick={performUndo} disabled={!canUndo} className={`p-1.5 sm:p-2 rounded-lg transition-colors ${!canUndo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Undo">
+            <Undo2 className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
-          <button onClick={performRedo} disabled={!canRedo} className={`p-2 rounded-lg transition-colors ${!canRedo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Redo">
-            <Redo2 className="w-5 h-5" />
+          <button onClick={performRedo} disabled={!canRedo} className={`p-1.5 sm:p-2 rounded-lg transition-colors ${!canRedo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Redo">
+            <Redo2 className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
-          <div className="w-px h-6 bg-slate-200 mx-1"></div>
+          <div className="w-px h-5 sm:h-6 bg-slate-200 mx-0.5 sm:mx-1"></div>
 
           <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
           <button
             onClick={() => setShowMoreMenu(!showMoreMenu)}
-            className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
+            className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
             title="More actions"
           >
-            <MoreVertical className="w-5 h-5" />
+            <MoreVertical className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {showMoreMenu && (
             <>
             <div className="fixed inset-0 z-[99]" onClick={() => setShowMoreMenu(false)}></div>
-            <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100]">
+            <div className="absolute top-full right-0 mt-2 w-52 sm:w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100] max-w-[calc(100vw-1rem)]">
               <button onClick={() => { disperseOverlappingNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                 <RefreshCw className="w-4 h-4 mr-2.5 text-indigo-500" /> Disperse Overlaps
               </button>
@@ -1525,9 +1537,17 @@ export default function WorkflowApp() {
       {/* --- Workspace Panel Layout --- */}
       <div className="flex-1 flex overflow-hidden w-full relative">
         
+        {/* --- Left Sidebar Overlay backdrop (mobile only) --- */}
+        {showSidebar && (
+          <div 
+            className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 md:hidden"
+            onClick={() => setShowSidebar(false)}
+          />
+        )}
+
         {/* --- Left Sidebar --- */}
         {showSidebar && (
-          <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200">
+          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -2145,18 +2165,18 @@ export default function WorkflowApp() {
 
 
           {/* --- Bottom-Right Floating Zoom and Guides --- */}
-          <div className="absolute bottom-6 right-6 flex items-center gap-3 z-50">
-            <div className="bg-white rounded-lg shadow-lg border border-slate-200 px-3.5 py-2.5 text-xs text-slate-500 font-medium flex items-center gap-2 max-w-sm">
+          <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 flex items-center gap-2 sm:gap-3 z-50">
+            <div className="hidden sm:flex bg-white rounded-lg shadow-lg border border-slate-200 px-3.5 py-2.5 text-xs text-slate-500 font-medium items-center gap-2 max-w-sm">
               <HelpCircle className="w-4 h-4 text-indigo-600 shrink-0" />
               <span>Right click cards to duplicate/raise. Double border indicates nested sub-group.</span>
             </div>
 
             <div className="flex flex-col items-center bg-white rounded-lg shadow-lg border border-slate-200 p-1">
-              <button onClick={() => handleZoom(0.25)} className="p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom In"><ZoomIn className="w-5 h-5"/></button>
-              <div className="w-full h-[1px] bg-slate-200 my-1" />
-              <button onClick={() => setTransform({x:0, y:0, scale:1})} className="p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Reset View"><Focus className="w-5 h-5"/></button>
-              <div className="w-full h-[1px] bg-slate-200 my-1" />
-              <button onClick={() => handleZoom(-0.25)} className="p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom Out"><ZoomOut className="w-5 h-5"/></button>
+              <button onClick={() => handleZoom(0.25)} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom In"><ZoomIn className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+              <div className="w-full h-[1px] bg-slate-200 my-0.5 sm:my-1" />
+              <button onClick={() => setTransform({x:0, y:0, scale:1})} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Reset View"><Focus className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+              <div className="w-full h-[1px] bg-slate-200 my-0.5 sm:my-1" />
+              <button onClick={() => handleZoom(-0.25)} className="p-1.5 sm:p-2 hover:bg-slate-100 text-slate-600 rounded-md transition-colors" title="Zoom Out"><ZoomOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
             </div>
           </div>
 
@@ -2222,17 +2242,17 @@ export default function WorkflowApp() {
         {/* --- Outline Backlog Board View --- */}
         {viewMode === 'outline' && (
           <div className="flex-1 overflow-hidden flex flex-col bg-slate-50">
-            <div className="px-6 py-3 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
-              <div>
-                <h2 className="text-sm font-bold text-slate-800">Outline Backlog Board</h2>
-                <p className="text-[10px] text-slate-400 font-medium">Structured nested view — changes sync to canvas instantly</p>
+            <div className="px-3 sm:px-6 py-3 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 gap-2">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-800 truncate">Outline Backlog Board</h2>
+                <p className="text-[10px] text-slate-400 font-medium hidden sm:block">Structured nested view — changes sync to canvas instantly</p>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => addNode()} className="flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow transition-all">
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Card
+              <div className="flex gap-1.5 sm:gap-2 shrink-0">
+                <button onClick={() => addNode()} className="flex items-center px-2 sm:px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow transition-all">
+                  <Plus className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline"> Add Card</span>
                 </button>
-                <button onClick={() => createGroup()} className="flex items-center px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-all">
-                  <Layers className="w-3.5 h-3.5 mr-1" /> Add Group
+                <button onClick={() => createGroup()} className="flex items-center px-2 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-all">
+                  <Layers className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline"> Add Group</span>
                 </button>
               </div>
             </div>
