@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix bug where clicking a node inside a group (without dragging) causes the node to escape the group. The root cause is in handlePointerUp: when draggingNode is set (even from a simple click), it always sets groupId to dragHoveredGroupId which is null when no pointer movement occurred. The fix must detect whether an actual drag happened (pointer moved beyond a small threshold) and if not, preserve the node's original groupId.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/App.jsx, locate the handlePointerUp callback (around line 490-545). Find the section that handles draggingNode finalization.",
     "Add a movement threshold check: compare draggingNode.currentX/currentY with draggingNode.initialX/initialY. If the total movement is less than ~5px (a click, not a drag), skip the group reassignment entirely - do NOT update the node position or groupId. Just clean up the drag state.",
@@ -21,5 +21,5 @@
     "npm run build"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "npm install was required before npm run build (node_modules not pre-installed). Build succeeds after fix. The fix adds a 5px movement threshold in handlePointerUp and preserves original groupId when node is still spatially within its original group bounds."
 }
