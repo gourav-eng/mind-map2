@@ -1318,8 +1318,89 @@ export default function WorkflowApp() {
     const alignGroupContents = (groupId, startX, startY, updatedNodes, updatedGroups) => {
       let currentY = startY + 80;
 
+      const groupNodes = updatedNodes.filter(n => n.groupId === groupId);
+      const groupNodeIds = new Set(groupNodes.map(n => n.id));
+
+      // Find edges that connect nodes within this group
+      const intraGroupEdges = edges.filter(e => groupNodeIds.has(e.source) && groupNodeIds.has(e.target));
+
+      // Separate connected vs unconnected nodes
+      const connectedNodeIds = new Set();
+      intraGroupEdges.forEach(e => {
+        connectedNodeIds.add(e.source);
+        connectedNodeIds.add(e.target);
+      });
+
+      const connectedNodes = groupNodes.filter(n => connectedNodeIds.has(n.id));
+      const unconnectedNodes = groupNodes.filter(n => !connectedNodeIds.has(n.id));
+
+      if (connectedNodes.length > 0) {
+        // Build adjacency for topological sort (depth assignment)
+        const inDegree = {};
+        const adj = {};
+        connectedNodes.forEach(n => { inDegree[n.id] = 0; adj[n.id] = []; });
+        intraGroupEdges.forEach(e => {
+          if (adj[e.source]) adj[e.source].push(e.target);
+          if (inDegree[e.target] !== undefined) inDegree[e.target]++;
+        });
+
+        // Assign depth via BFS (Kahn's algorithm)
+        const depth = {};
+        const queue = [];
+        connectedNodes.forEach(n => { if (inDegree[n.id] === 0) { queue.push(n.id); depth[n.id] = 0; } });
+        let qi = 0;
+        while (qi < queue.length) {
+          const cur = queue[qi++];
+          (adj[cur] || []).forEach(t => {
+            inDegree[t]--;
+            depth[t] = Math.max(depth[t] || 0, (depth[cur] || 0) + 1);
+            if (inDegree[t] === 0) queue.push(t);
+          });
+        }
+        // Handle cycles: assign remaining nodes to max depth + 1
+        connectedNodes.forEach(n => { if (depth[n.id] === undefined) depth[n.id] = (Math.max(...Object.values(depth), 0)) + 1; });
+
+        // Group nodes by column (depth)
+        const columns = {};
+        connectedNodes.forEach(n => {
+          const d = depth[n.id] || 0;
+          if (!columns[d]) columns[d] = [];
+          columns[d].push(n);
+        });
+
+        const NODE_WIDTH = 340;
+        const H_GAP = 80;
+        const V_GAP = 30;
+        const baseX = startX + 40;
+        const baseY = currentY;
+        let maxBottomY = baseY;
+
+        const sortedDepths = Object.keys(columns).map(Number).sort((a, b) => a - b);
+        const positionMap = {};
+
+        sortedDepths.forEach((d, colIdx) => {
+          const colX = baseX + colIdx * (NODE_WIDTH + H_GAP);
+          let colY = baseY;
+          columns[d].forEach(n => {
+            positionMap[n.id] = { x: colX, y: colY };
+            colY += (n.expanded ? 280 : 120) + V_GAP;
+          });
+          maxBottomY = Math.max(maxBottomY, colY);
+        });
+
+        updatedNodes = updatedNodes.map(n => {
+          if (positionMap[n.id]) {
+            return { ...n, x: positionMap[n.id].x, y: positionMap[n.id].y };
+          }
+          return n;
+        });
+
+        currentY = maxBottomY + 20;
+      }
+
+      // Stack unconnected nodes vertically below
       updatedNodes = updatedNodes.map(n => {
-        if (n.groupId === groupId) {
+        if (n.groupId === groupId && !connectedNodeIds.has(n.id)) {
           const nodeX = startX + 40;
           const nodeY = currentY;
           currentY += (n.expanded ? 280 : 120) + 30;
@@ -1879,7 +1960,7 @@ export default function WorkflowApp() {
           style={{ display: viewMode === 'canvas' ? undefined : 'none' }}
         >
           {/* Panning grid backdrop */}
-          <div className="absolute inset-0 canvas-grid-clickable cursor-grab active:cursor-grabbing opacity-60" style={{
+          <div className="absolute inset-0 canvas-grid-clickable cursor-crosshair active:cursor-grabbing opacity-60" style={{
             backgroundImage: 'radial-gradient(#94a3b8 1.5px, transparent 1.5px)',
             backgroundSize: `${24 * transform.scale}px ${24 * transform.scale}px`,
             backgroundPosition: `${transform.x}px ${transform.y}px`

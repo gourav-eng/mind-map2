@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix auto-align to use horizontal/flow layout for connected nodes within a group, and fix cursor visibility on canvas background",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Fix autoAlignWorkspace (line ~1305 in src/App.jsx): The current `alignGroupContents` function stacks ALL nodes within a group vertically (incrementing currentY). This is wrong when nodes within the same group are connected to each other via edges. The fix should: (a) Within `alignGroupContents`, separate the nodes in that group into connected vs unconnected sets by examining edges. (b) For nodes that have connections between them within the same group, use a topological/layered horizontal layout - place source nodes on the left, target nodes on the right, arranged in columns by dependency depth. Use NODE_WIDTH=340 plus horizontal spacing (~60px) between columns, and vertical spacing (~30px) between nodes in the same column. (c) For nodes that are NOT connected to any other node in the same group, keep the existing vertical stacking behavior below the flow-laid-out nodes.",
+    "Step 2 - Fix cursor visibility on canvas (line ~1845 in src/App.jsx): The canvas grid overlay div has class `cursor-grab active:cursor-grabbing`. On desktop, when hovering over the empty canvas background, the grab cursor can become invisible against the light #fafafa background (the grab hand icon color blends with the canvas). Fix by changing the cursor to `cursor-crosshair` (which provides a high-contrast dark crosshair) or `cursor-default` for the grid overlay when not panning. The main element `<main>` should have `cursor-default` and the grid overlay should use a clearly visible cursor like `cursor-crosshair` that contrasts with the light background. When actively panning (mousedown/active state), keep `active:cursor-grabbing`.",
+    "Step 3 - Verify the build compiles without errors by running `npm run build`."
+  ],
+  "acceptance_criteria": [
+    "Running `npm run build` succeeds without errors",
+    "The autoAlignWorkspace function arranges connected nodes within a group in a horizontal flow layout (source nodes left, targets right) rather than purely vertical",
+    "Unconnected nodes within a group still stack vertically",
+    "The canvas background cursor is clearly visible (crosshair or default) and does not blend into the background color",
+    "The active/panning cursor remains as grabbing"
+  ],
+  "verification": [
+    "Run `npm run build` and confirm it completes successfully with exit code 0"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
