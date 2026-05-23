@@ -595,18 +595,30 @@ export default function WorkflowApp() {
         groupId: null
       };
 
-      updateActiveWorkspace(ws => {
-        const updatedNodes = [...ws.nodes, newNode];
-        return {
-          nodes: updatedNodes,
-          groups: computeLayout(ws.groups, updatedNodes)
-        };
-      });
-      setNextId(prev => prev + 1);
-
       if (clipData.action === 'cut') {
+        // Atomic: paste + remove source in one setWorkspaces call
         setWorkspaces(prev => prev.map(ws => {
-          if (ws.id === clipData.sourceWorkspaceId) {
+          if (ws.id === activeTab) {
+            // Add pasted node to active workspace
+            const updatedNodes = [...ws.nodes, newNode];
+            let resultWs = {
+              ...ws,
+              nodes: updatedNodes,
+              groups: computeLayout(ws.groups, updatedNodes)
+            };
+            // If source is ALSO active workspace, remove source from same update
+            if (clipData.sourceWorkspaceId === activeTab) {
+              const filteredNodes = resultWs.nodes.filter(n => n.id !== clipData.sourceNodeId);
+              resultWs = {
+                ...resultWs,
+                nodes: filteredNodes,
+                edges: resultWs.edges.filter(e => e.source !== clipData.sourceNodeId && e.target !== clipData.sourceNodeId),
+                groups: computeLayout(resultWs.groups, filteredNodes)
+              };
+            }
+            return resultWs;
+          } else if (ws.id === clipData.sourceWorkspaceId) {
+            // Remove source from different workspace
             const filteredNodes = ws.nodes.filter(n => n.id !== clipData.sourceNodeId);
             return {
               ...ws,
@@ -617,13 +629,23 @@ export default function WorkflowApp() {
           }
           return ws;
         }));
+      } else {
+        // Copy: just add to active workspace
+        updateActiveWorkspace(ws => {
+          const updatedNodes = [...ws.nodes, newNode];
+          return {
+            nodes: updatedNodes,
+            groups: computeLayout(ws.groups, updatedNodes)
+          };
+        });
       }
 
+      setNextId(prev => prev + 1);
       localStorage.removeItem('nexus-clipboard');
     } catch (e) {
       // Invalid clipboard data, ignore
     }
-  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces]);
+  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -814,6 +836,7 @@ export default function WorkflowApp() {
     setOpenLinkPicker(null);
     setContextMenu(null);
     setNodeContextMenu(null);
+    setFocusedNodeId(null);
 
     const isClickBg = e.target === workspaceRef.current || e.target.classList.contains('canvas-grid-clickable');
     if (isClickBg) {
