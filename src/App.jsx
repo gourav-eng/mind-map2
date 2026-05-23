@@ -298,6 +298,8 @@ export default function WorkflowApp() {
   const [errorMessage, setErrorMessage] = useState('');
   const [pendingImageDrop, setPendingImageDrop] = useState(null);
   const [focusedNodeId, setFocusedNodeId] = useState(null);
+  const [focusedGroupId, setFocusedGroupId] = useState(null);
+  const [groupContextMenu, setGroupContextMenu] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -374,6 +376,7 @@ export default function WorkflowApp() {
       clientY: e.clientY
     });
     setNodeContextMenu(null);
+    setGroupContextMenu(null);
   }, []);
 
 
@@ -661,6 +664,174 @@ export default function WorkflowApp() {
     }
   }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
 
+  // --- Copy/Cut/Paste Group Functions ---
+  const copyGroup = useCallback((groupId) => {
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+    const { descendantGroupIds, descendantNodeIds } = getDescendants(groupId, groups, nodes);
+    const allGroupIds = [groupId, ...descendantGroupIds];
+    const allNodeIds = [...new Set([...descendantNodeIds, ...nodes.filter(n => n.groupId === groupId).map(n => n.id)])];
+    
+    const groupData = groups.filter(g => allGroupIds.includes(g.id));
+    const nodeData = nodes.filter(n => allNodeIds.includes(n.id));
+    const nodeIdSet = new Set(allNodeIds);
+    const edgeData = edges.filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target));
+
+    // Store positions relative to the root group's top-left
+    const originX = group.x;
+    const originY = group.y;
+
+    const clipData = {
+      groups: groupData.map(g => ({ ...g, x: g.x - originX, y: g.y - originY })),
+      nodes: nodeData.map(n => ({ ...n, x: n.x - originX, y: n.y - originY })),
+      edges: edgeData,
+      action: 'copy',
+      sourceWorkspaceId: activeTab,
+      sourceGroupId: groupId,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('nexus-clipboard-group', JSON.stringify(clipData));
+  }, [groups, nodes, edges, activeTab]);
+
+  const cutGroup = useCallback((groupId) => {
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+    const { descendantGroupIds, descendantNodeIds } = getDescendants(groupId, groups, nodes);
+    const allGroupIds = [groupId, ...descendantGroupIds];
+    const allNodeIds = [...new Set([...descendantNodeIds, ...nodes.filter(n => n.groupId === groupId).map(n => n.id)])];
+    
+    const groupData = groups.filter(g => allGroupIds.includes(g.id));
+    const nodeData = nodes.filter(n => allNodeIds.includes(n.id));
+    const nodeIdSet = new Set(allNodeIds);
+    const edgeData = edges.filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target));
+
+    const originX = group.x;
+    const originY = group.y;
+
+    const clipData = {
+      groups: groupData.map(g => ({ ...g, x: g.x - originX, y: g.y - originY })),
+      nodes: nodeData.map(n => ({ ...n, x: n.x - originX, y: n.y - originY })),
+      edges: edgeData,
+      action: 'cut',
+      sourceWorkspaceId: activeTab,
+      sourceGroupId: groupId,
+      sourceGroupIds: allGroupIds,
+      sourceNodeIds: allNodeIds,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('nexus-clipboard-group', JSON.stringify(clipData));
+  }, [groups, nodes, edges, activeTab]);
+
+  const pasteGroup = useCallback((targetX, targetY) => {
+    const clipJson = localStorage.getItem('nexus-clipboard-group');
+    if (!clipJson) return;
+    try {
+      const clipData = JSON.parse(clipJson);
+      if (!clipData.groups || clipData.groups.length === 0) return;
+
+      takeSnapshot();
+
+      let pasteX = targetX;
+      let pasteY = targetY;
+      if (pasteX === undefined || pasteY === undefined) {
+        if (workspaceRef.current) {
+          const rect = workspaceRef.current.getBoundingClientRect();
+          pasteX = (rect.width / 2 - transform.x) / transform.scale - 200;
+          pasteY = (rect.height / 2 - transform.y) / transform.scale - 150;
+        } else {
+          pasteX = 200;
+          pasteY = 200;
+        }
+      }
+
+      // Generate new IDs for all groups, nodes, and edges
+      let idCounter = nextId;
+      const groupIdMap = {};
+      const nodeIdMap = {};
+
+      clipData.groups.forEach(g => {
+        groupIdMap[g.id] = `g-${Date.now()}-${idCounter}`;
+        idCounter++;
+      });
+      clipData.nodes.forEach(n => {
+        nodeIdMap[n.id] = idCounter.toString();
+        idCounter++;
+      });
+
+      const newGroups = clipData.groups.map(g => ({
+        ...g,
+        id: groupIdMap[g.id],
+        x: g.x + pasteX,
+        y: g.y + pasteY,
+        parentGroupId: g.parentGroupId ? groupIdMap[g.parentGroupId] || null : null
+      }));
+
+      const newNodes = clipData.nodes.map(n => ({
+        ...n,
+        id: nodeIdMap[n.id],
+        x: n.x + pasteX,
+        y: n.y + pasteY,
+        groupId: n.groupId ? groupIdMap[n.groupId] || null : null
+      }));
+
+      const newEdges = clipData.edges.map(e => ({
+        ...e,
+        id: `e-${Date.now()}-${idCounter++}`,
+        source: nodeIdMap[e.source] || e.source,
+        target: nodeIdMap[e.target] || e.target
+      }));
+
+      if (clipData.action === 'cut') {
+        setWorkspaces(prev => prev.map(ws => {
+          if (ws.id === activeTab) {
+            let updatedNodes = [...ws.nodes, ...newNodes];
+            let updatedGroups = [...ws.groups, ...newGroups];
+            let updatedEdges = [...ws.edges, ...newEdges];
+            // If source is also active workspace, remove originals
+            if (clipData.sourceWorkspaceId === activeTab) {
+              updatedNodes = updatedNodes.filter(n => !clipData.sourceNodeIds.includes(n.id));
+              updatedGroups = updatedGroups.filter(g => !clipData.sourceGroupIds.includes(g.id));
+              const sourceNodeSet = new Set(clipData.sourceNodeIds);
+              updatedEdges = updatedEdges.filter(e => !sourceNodeSet.has(e.source) && !sourceNodeSet.has(e.target));
+            }
+            return {
+              ...ws,
+              nodes: updatedNodes,
+              edges: updatedEdges,
+              groups: computeLayout(updatedGroups, updatedNodes)
+            };
+          } else if (ws.id === clipData.sourceWorkspaceId) {
+            const updatedNodes = ws.nodes.filter(n => !clipData.sourceNodeIds.includes(n.id));
+            const sourceNodeSet = new Set(clipData.sourceNodeIds);
+            return {
+              ...ws,
+              nodes: updatedNodes,
+              edges: ws.edges.filter(e => !sourceNodeSet.has(e.source) && !sourceNodeSet.has(e.target)),
+              groups: computeLayout(ws.groups.filter(g => !clipData.sourceGroupIds.includes(g.id)), updatedNodes)
+            };
+          }
+          return ws;
+        }));
+      } else {
+        updateActiveWorkspace(ws => {
+          const updatedNodes = [...ws.nodes, ...newNodes];
+          const updatedGroups = [...ws.groups, ...newGroups];
+          const updatedEdges = [...ws.edges, ...newEdges];
+          return {
+            nodes: updatedNodes,
+            edges: updatedEdges,
+            groups: computeLayout(updatedGroups, updatedNodes)
+          };
+        });
+      }
+
+      setNextId(idCounter);
+      localStorage.removeItem('nexus-clipboard-group');
+    } catch (e) {
+      // Invalid clipboard data, ignore
+    }
+  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces, activeTab]);
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -672,23 +843,34 @@ export default function WorkflowApp() {
         e.preventDefault();
         performRedo();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
-        if (focusedNodeId) {
+        if (focusedGroupId) {
+          e.preventDefault();
+          copyGroup(focusedGroupId);
+        } else if (focusedNodeId) {
           e.preventDefault();
           copyNode(focusedNodeId);
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
-        if (focusedNodeId) {
+        if (focusedGroupId) {
+          e.preventDefault();
+          cutGroup(focusedGroupId);
+        } else if (focusedNodeId) {
           e.preventDefault();
           cutNode(focusedNodeId);
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         e.preventDefault();
-        pasteNode();
+        // Prefer group clipboard if it exists
+        if (localStorage.getItem('nexus-clipboard-group')) {
+          pasteGroup();
+        } else {
+          pasteNode();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [performUndo, performRedo, copyNode, cutNode, pasteNode, focusedNodeId]);
+  }, [performUndo, performRedo, copyNode, cutNode, pasteNode, copyGroup, cutGroup, pasteGroup, focusedNodeId, focusedGroupId]);
 
 
   // --- Workspace (Tab) Operations ---
@@ -794,6 +976,8 @@ export default function WorkflowApp() {
     const nodeCenterX = nodeX + NODE_WIDTH_VAL / 2;
     const nodeCenterY = nodeY + 80;
 
+    // Collect all groups containing the point
+    const containingGroups = [];
     for (const group of groups) {
       const coords = getLiveCoordinates(group, true);
       const gW = group.width || 440;
@@ -805,10 +989,25 @@ export default function WorkflowApp() {
         nodeCenterY >= coords.y &&
         nodeCenterY <= coords.y + gH
       ) {
-        return group.id;
+        containingGroups.push(group);
       }
     }
-    return null;
+
+    if (containingGroups.length === 0) return null;
+
+    // Return the deepest (most nested) group
+    const getDepth = (g) => {
+      let depth = 0;
+      let curr = g;
+      while (curr && curr.parentGroupId) {
+        depth++;
+        curr = groups.find(p => p.id === curr.parentGroupId);
+      }
+      return depth;
+    };
+
+    containingGroups.sort((a, b) => getDepth(b) - getDepth(a));
+    return containingGroups[0].id;
   }, [groups, getLiveCoordinates]);
 
 
@@ -850,7 +1049,9 @@ export default function WorkflowApp() {
     setOpenLinkPicker(null);
     setContextMenu(null);
     setNodeContextMenu(null);
+    setGroupContextMenu(null);
     setFocusedNodeId(null);
+    setFocusedGroupId(null);
 
     const isClickBg = e.target === workspaceRef.current || e.target.classList.contains('canvas-grid-clickable');
     if (isClickBg) {
@@ -945,7 +1146,11 @@ export default function WorkflowApp() {
         updateActiveWorkspace(ws => {
           let resolvedGroupId = finalGroupAdoptId;
 
-          if (resolvedGroupId === null) {
+          // For micro-drags (< 15px), preserve original groupId
+          if (movement < 15) {
+            const originalNode = ws.nodes.find(n => n.id === draggingNode.id);
+            resolvedGroupId = originalNode ? originalNode.groupId : resolvedGroupId;
+          } else if (resolvedGroupId === null) {
             const originalNode = ws.nodes.find(n => n.id === draggingNode.id);
             if (originalNode && originalNode.groupId) {
               const originalGroup = ws.groups.find(g => g.id === originalNode.groupId);
@@ -986,6 +1191,7 @@ export default function WorkflowApp() {
       } else {
         // Click (no drag) - select the node
         setFocusedNodeId(draggingNode.id);
+        setFocusedGroupId(null);
         bringToFront(draggingNode.id);
       }
     }
@@ -1312,7 +1518,6 @@ export default function WorkflowApp() {
     }));
 
     const rootGroups = resetGroups.filter(g => !g.parentGroupId);
-    const spacingX = 600;
     let currentRootX = 100;
 
     const alignGroupContents = (groupId, startX, startY, updatedNodes, updatedGroups) => {
@@ -1446,7 +1651,31 @@ export default function WorkflowApp() {
       workingNodes = res.nodes;
       workingGroups = res.groups;
 
-      currentRootX += spacingX;
+      // Compute actual width of this root group by examining all nodes and descendant subgroups
+      const { descendantGroupIds, descendantNodeIds } = getDescendants(rg.id, workingGroups, workingNodes);
+      const allGroupIds = [rg.id, ...descendantGroupIds];
+      const allNodeIds = [...descendantNodeIds, ...workingNodes.filter(n => n.groupId === rg.id).map(n => n.id)];
+
+      let minX = rgX;
+      let maxX = rgX + 440;
+
+      allNodeIds.forEach(nid => {
+        const n = workingNodes.find(nd => nd.id === nid);
+        if (n) {
+          minX = Math.min(minX, n.x);
+          maxX = Math.max(maxX, n.x + 340);
+        }
+      });
+
+      allGroupIds.forEach(gid => {
+        const g = workingGroups.find(gr => gr.id === gid);
+        if (g) {
+          minX = Math.min(minX, g.x);
+          maxX = Math.max(maxX, g.x + (g.width || 440));
+        }
+      });
+
+      currentRootX = maxX + 60;
     });
 
     const looseNodes = workingNodes.filter(n => !n.groupId);
@@ -2014,6 +2243,8 @@ export default function WorkflowApp() {
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       if (e.target.tagName === 'INPUT' || e.target.closest('button')) return;
+                      setFocusedGroupId(group.id);
+                      setFocusedNodeId(null);
                       dragSnapshot.current = JSON.parse(JSON.stringify(stateRef.current));
                       setDraggingGroup({
                         id: group.id,
@@ -2026,6 +2257,18 @@ export default function WorkflowApp() {
                         width: group.width || 440,
                         height: group.height || 420
                       });
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = workspaceRef.current.getBoundingClientRect();
+                      setGroupContextMenu({
+                        x: e.clientX - rect.left,
+                        y: e.clientY - rect.top,
+                        groupId: group.id
+                      });
+                      setContextMenu(null);
+                      setNodeContextMenu(null);
                     }}
                   >
                     <div className="flex items-center gap-2 flex-1 overflow-hidden">
@@ -2446,6 +2689,17 @@ export default function WorkflowApp() {
                   <ClipboardPaste className="w-4 h-4 mr-2 text-indigo-600" /> Paste Node Here
                 </button>
               )}
+              {localStorage.getItem('nexus-clipboard-group') && (
+                <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => {
+                  const rect = workspaceRef.current.getBoundingClientRect();
+                  const pasteX = (contextMenu.clientX - rect.left - transform.x) / transform.scale;
+                  const pasteY = (contextMenu.clientY - rect.top - transform.y) / transform.scale;
+                  pasteGroup(pasteX, pasteY);
+                  setContextMenu(null);
+                }}>
+                  <ClipboardPaste className="w-4 h-4 mr-2 text-indigo-600" /> Paste Group Here
+                </button>
+              )}
               <button className="w-full text-left px-4 py-2 hover:bg-slate-100 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setContextMenu(null); }}>
                 <Focus className="w-4 h-4 mr-2 text-slate-500" /> Reset View
               </button>
@@ -2491,6 +2745,32 @@ export default function WorkflowApp() {
               
               <button className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs font-semibold text-red-600 flex items-center" onClick={() => { deleteNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Trash2 className="w-3.5 h-3.5 mr-2 text-red-500" /> Delete Card
+              </button>
+            </div>
+          )}
+
+          {/* --- Group Context Menu --- */}
+          {groupContextMenu && (
+            <div 
+              className="absolute z-[200] bg-white border border-slate-200 rounded-xl shadow-xl py-2 min-w-[180px] animate-in fade-in zoom-in-95 duration-100"
+              style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <div className="px-4 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Group Actions</div>
+              
+              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { copyGroup(groupContextMenu.groupId); setGroupContextMenu(null); }}>
+                <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Copy Group
+              </button>
+              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cutGroup(groupContextMenu.groupId); setGroupContextMenu(null); }}>
+                <Scissors className="w-3.5 h-3.5 mr-2 text-slate-500" /> Cut Group
+              </button>
+              
+              <div className="h-px bg-slate-150 my-1 w-full" />
+              
+              <button className="w-full text-left px-4 py-2 hover:bg-red-50 text-xs font-semibold text-red-600 flex items-center" onClick={() => { deleteGroup(groupContextMenu.groupId); setGroupContextMenu(null); }}>
+                <Trash2 className="w-3.5 h-3.5 mr-2 text-red-500" /> Delete Group
               </button>
             </div>
           )}
