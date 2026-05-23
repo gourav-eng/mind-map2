@@ -1,0 +1,7 @@
+{
+  "task_id": "task-password-protection",
+  "task_description": "Add client-side password protection to the mind map app. When enabled via a toggle in the sidebar, every page load/refresh requires entering the correct password before the app becomes accessible. Password settings (enable/disable toggle + password input) live in the sidebar menu.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

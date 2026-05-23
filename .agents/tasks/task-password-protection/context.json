@@ -1,0 +1,20 @@
+{
+  "project_type": "React SPA mind map application (single-file App.jsx)",
+  "language": "JavaScript/JSX",
+  "build_system": "Vite with React plugin, Tailwind CSS for styling",
+  "test_framework": "None - no test infrastructure exists",
+  "build_command": "npm run build",
+  "test_command": "No tests exist - verify via build only",
+  "verification_instructions": "Run `npm run build` to confirm no compilation/bundling errors. Visually inspect code logic for correctness.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/mind-map2 && npm install",
+  "environment_constraints": "No test framework. Single-file React app (src/App.jsx is ~2982 lines). Uses localStorage for persistence. Uses lucide-react for icons. Uses Tailwind CSS classes for all styling.",
+  "contribution_requirements": "No CONTRIBUTING.md exists. Follow existing code patterns - inline Tailwind CSS, functional components with hooks, localStorage for persistence.",
+  "key_patterns": "All app state is in the WorkflowApp component. Sidebar is conditionally rendered via `showSidebar` state. The sidebar has sections for Import/Export, View mode toggle, Workspaces list, Task Stats, and Nodes Directory. All persistence uses localStorage with 'premium-' prefix keys. Icons come from lucide-react.",
+  "relevant_files": [
+    "src/App.jsx",
+    "src/main.jsx",
+    "package.json"
+  ],
+  "directory_structure": "Single src directory with App.jsx (main component), main.jsx (entry point), index.css (Tailwind directives). All application logic is in App.jsx."
+}
