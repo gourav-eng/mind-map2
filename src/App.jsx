@@ -5,7 +5,7 @@ import {
   Download, Upload, Undo2, Redo2, Layers, Link2, ExternalLink, HelpCircle,
   Sparkles, CheckSquare, Clock, AlertCircle, BarChart2, PanelLeftClose, PanelLeft,
   Grid, Move, Copy, ArrowUp, ArrowDown, RefreshCw, LayoutList, MonitorSpeaker,
-  MoreVertical, ImageIcon, ChevronUp
+  MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste
 } from 'lucide-react';
 
 // --- Premium Color Themes ---
@@ -529,6 +529,102 @@ export default function WorkflowApp() {
     setNextId(next.nextId);
   }, [updateHistory]);
 
+  const activeWs = workspaces.find(w => w.id === activeTab) || workspaces[0];
+  const nodes = activeWs?.nodes || [];
+  const edges = activeWs?.edges || [];
+  const groups = activeWs?.groups || [];
+
+  const updateActiveWorkspace = useCallback((updater) => {
+    setWorkspaces(prev => prev.map(ws => ws.id === activeTab ? { ...ws, ...updater(ws) } : ws));
+  }, [activeTab]);
+
+  // --- Copy/Cut/Paste Node Functions ---
+  const copyNode = useCallback((nodeId) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const clipData = {
+      node: { ...node, id: undefined },
+      action: 'copy',
+      sourceWorkspaceId: activeTab,
+      sourceNodeId: nodeId,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('nexus-clipboard', JSON.stringify(clipData));
+  }, [nodes, activeTab]);
+
+  const cutNode = useCallback((nodeId) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const clipData = {
+      node: { ...node, id: undefined },
+      action: 'cut',
+      sourceWorkspaceId: activeTab,
+      sourceNodeId: nodeId,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('nexus-clipboard', JSON.stringify(clipData));
+  }, [nodes, activeTab]);
+
+  const pasteNode = useCallback((targetX, targetY) => {
+    const clipJson = localStorage.getItem('nexus-clipboard');
+    if (!clipJson) return;
+    try {
+      const clipData = JSON.parse(clipJson);
+      if (!clipData.node) return;
+
+      takeSnapshot();
+
+      let pasteX = targetX;
+      let pasteY = targetY;
+      if (pasteX === undefined || pasteY === undefined) {
+        if (workspaceRef.current) {
+          const rect = workspaceRef.current.getBoundingClientRect();
+          pasteX = (rect.width / 2 - transform.x) / transform.scale - 170;
+          pasteY = (rect.height / 2 - transform.y) / transform.scale - 80;
+        } else {
+          pasteX = 200;
+          pasteY = 200;
+        }
+      }
+
+      const newNode = {
+        ...clipData.node,
+        id: nextId.toString(),
+        x: pasteX,
+        y: pasteY,
+        groupId: null
+      };
+
+      updateActiveWorkspace(ws => {
+        const updatedNodes = [...ws.nodes, newNode];
+        return {
+          nodes: updatedNodes,
+          groups: computeLayout(ws.groups, updatedNodes)
+        };
+      });
+      setNextId(prev => prev + 1);
+
+      if (clipData.action === 'cut') {
+        setWorkspaces(prev => prev.map(ws => {
+          if (ws.id === clipData.sourceWorkspaceId) {
+            const filteredNodes = ws.nodes.filter(n => n.id !== clipData.sourceNodeId);
+            return {
+              ...ws,
+              nodes: filteredNodes,
+              edges: ws.edges.filter(e => e.source !== clipData.sourceNodeId && e.target !== clipData.sourceNodeId),
+              groups: computeLayout(ws.groups, filteredNodes)
+            };
+          }
+          return ws;
+        }));
+      }
+
+      localStorage.removeItem('nexus-clipboard');
+    } catch (e) {
+      // Invalid clipboard data, ignore
+    }
+  }, [takeSnapshot, nextId, transform, updateActiveWorkspace, setWorkspaces]);
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -539,20 +635,24 @@ export default function WorkflowApp() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         performRedo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        if (focusedNodeId) {
+          e.preventDefault();
+          copyNode(focusedNodeId);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+        if (focusedNodeId) {
+          e.preventDefault();
+          cutNode(focusedNodeId);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        pasteNode();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [performUndo, performRedo]);
-
-  const activeWs = workspaces.find(w => w.id === activeTab) || workspaces[0];
-  const nodes = activeWs?.nodes || [];
-  const edges = activeWs?.edges || [];
-  const groups = activeWs?.groups || [];
-
-  const updateActiveWorkspace = useCallback((updater) => {
-    setWorkspaces(prev => prev.map(ws => ws.id === activeTab ? { ...ws, ...updater(ws) } : ws));
-  }, [activeTab]);
+  }, [performUndo, performRedo, copyNode, cutNode, pasteNode, focusedNodeId]);
 
 
   // --- Workspace (Tab) Operations ---
@@ -846,6 +946,10 @@ export default function WorkflowApp() {
           const newPast = [...pastRef.current, snapshotToSave];
           updateHistory(newPast, []);
         }
+      } else {
+        // Click (no drag) - select the node
+        setFocusedNodeId(draggingNode.id);
+        bringToFront(draggingNode.id);
       }
     }
 
@@ -2159,6 +2263,17 @@ export default function WorkflowApp() {
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { createGroup(contextMenu.clientX, contextMenu.clientY); setContextMenu(null); }}>
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" /> Create Group Here
               </button>
+              {localStorage.getItem('nexus-clipboard') && (
+                <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => {
+                  const rect = workspaceRef.current.getBoundingClientRect();
+                  const pasteX = (contextMenu.clientX - rect.left - transform.x) / transform.scale;
+                  const pasteY = (contextMenu.clientY - rect.top - transform.y) / transform.scale;
+                  pasteNode(pasteX, pasteY);
+                  setContextMenu(null);
+                }}>
+                  <ClipboardPaste className="w-4 h-4 mr-2 text-indigo-600" /> Paste Node Here
+                </button>
+              )}
               <button className="w-full text-left px-4 py-2 hover:bg-slate-100 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setContextMenu(null); }}>
                 <Focus className="w-4 h-4 mr-2 text-slate-500" /> Reset View
               </button>
@@ -2186,6 +2301,12 @@ export default function WorkflowApp() {
               </button>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { sendToBack(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <ArrowDown className="w-3.5 h-3.5 mr-2 text-slate-500" /> Send to Back
+              </button>
+              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { copyNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
+                <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Copy Node
+              </button>
+              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cutNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
+                <Scissors className="w-3.5 h-3.5 mr-2 text-slate-500" /> Cut Node
               </button>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { duplicateNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Duplicate Card
