@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix bug where clicking a node inside a group (without dragging) causes the node to escape the group. The root cause is in handlePointerUp: when draggingNode is set (even from a simple click), it always sets groupId to dragHoveredGroupId which is null when no pointer movement occurred. The fix must detect whether an actual drag happened (pointer moved beyond a small threshold) and if not, preserve the node's original groupId.",
+  "status": "in_progress",
+  "steps": [
+    "In src/App.jsx, locate the handlePointerUp callback (around line 490-545). Find the section that handles draggingNode finalization.",
+    "Add a movement threshold check: compare draggingNode.currentX/currentY with draggingNode.initialX/initialY. If the total movement is less than ~5px (a click, not a drag), skip the group reassignment entirely - do NOT update the node position or groupId. Just clean up the drag state.",
+    "When it IS a real drag (movement >= threshold), keep existing behavior: update node position and set groupId to finalGroupAdoptId (dragHoveredGroupId). But add one important fix: if dragHoveredGroupId is null AND the node was originally in a group, check if the node is still spatially within its original group bounds. If yes, preserve the original groupId instead of setting it to null. This prevents accidental ungrouping from small drags within the group.",
+    "Also ensure the undo snapshot (dragSnapshot.current) is only pushed to history when an actual drag occurred (movement >= threshold), not on simple clicks."
+  ],
+  "acceptance_criteria": [
+    "Clicking a node inside a group (pointer down + pointer up with no/minimal movement) keeps the node in its group - groupId is preserved",
+    "Dragging a node within a group to a new position within the same group keeps it in the group",
+    "Dragging a node out of a group (to empty canvas) removes it from the group as before",
+    "Dragging a node from one group into another group still works (adopts new groupId)",
+    "Undo history is not polluted by simple click events",
+    "npm run build succeeds without errors"
+  ],
+  "verification": [
+    "npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

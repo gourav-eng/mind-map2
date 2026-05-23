@@ -797,23 +797,55 @@ export default function WorkflowApp() {
 
   const handlePointerUp = useCallback(() => {
     if (draggingNode) {
-      const finalGroupAdoptId = dragHoveredGroupId;
+      const movement = Math.hypot(
+        draggingNode.currentX - draggingNode.initialX,
+        draggingNode.currentY - draggingNode.initialY
+      );
 
-      updateActiveWorkspace(ws => {
-        const updatedNodes = ws.nodes.map(n => n.id === draggingNode.id 
-          ? { ...n, x: draggingNode.currentX, y: draggingNode.currentY, groupId: finalGroupAdoptId } 
-          : n);
+      if (movement >= 5) {
+        const finalGroupAdoptId = dragHoveredGroupId;
 
-        return {
-          nodes: updatedNodes,
-          groups: computeLayout(ws.groups, updatedNodes)
-        };
-      });
+        updateActiveWorkspace(ws => {
+          let resolvedGroupId = finalGroupAdoptId;
 
-      if (dragSnapshot.current) {
-        const snapshotToSave = dragSnapshot.current;
-        const newPast = [...pastRef.current, snapshotToSave];
-        updateHistory(newPast, []);
+          if (resolvedGroupId === null) {
+            const originalNode = ws.nodes.find(n => n.id === draggingNode.id);
+            if (originalNode && originalNode.groupId) {
+              const originalGroup = ws.groups.find(g => g.id === originalNode.groupId);
+              if (originalGroup) {
+                const NODE_WIDTH_VAL = 340;
+                const nodeCenterX = draggingNode.currentX + NODE_WIDTH_VAL / 2;
+                const nodeCenterY = draggingNode.currentY + 80;
+                const gW = originalGroup.width || 440;
+                const gH = originalGroup.height || 420;
+
+                if (
+                  nodeCenterX >= originalGroup.x &&
+                  nodeCenterX <= originalGroup.x + gW &&
+                  nodeCenterY >= originalGroup.y &&
+                  nodeCenterY <= originalGroup.y + gH
+                ) {
+                  resolvedGroupId = originalNode.groupId;
+                }
+              }
+            }
+          }
+
+          const updatedNodes = ws.nodes.map(n => n.id === draggingNode.id 
+            ? { ...n, x: draggingNode.currentX, y: draggingNode.currentY, groupId: resolvedGroupId } 
+            : n);
+
+          return {
+            nodes: updatedNodes,
+            groups: computeLayout(ws.groups, updatedNodes)
+          };
+        });
+
+        if (dragSnapshot.current) {
+          const snapshotToSave = dragSnapshot.current;
+          const newPast = [...pastRef.current, snapshotToSave];
+          updateHistory(newPast, []);
+        }
       }
     }
 
