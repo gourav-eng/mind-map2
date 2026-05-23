@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix three issues: (1) auto-align groups overlap, (2) clicking a node in a sub-group incorrectly moves it to parent group, (3) add copy/cut/paste for groups",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "BUG 1 - Auto-align overlap fix in autoAlignWorkspace() (around line 1305-1470): The rootGroups.forEach loop uses a fixed `spacingX = 600` for positioning each root group. After alignGroupContents() positions the nodes/subgroups inside a root group, the actual width of that group is unknown at that point (it gets computed later by computeLayout). Fix: After processing each root group's contents, compute the actual bounding box of that group (examining all nodes with groupId matching the root group and all descendant subgroups), then advance currentRootX by the actual computed width + a gap (e.g., 60px) instead of a fixed 600px.",
     "BUG 2 - Clicking a node in sub-group moves it to parent group. The issue is in handlePointerUp (around line 920-990). When movement >= 5, it uses `dragHoveredGroupId` (set by getSpatiallyHoveredGroup during pointer move). getSpatiallyHoveredGroup (around line 790) iterates groups in array order and returns the FIRST group containing the node center. For nested groups, both the sub-group AND the parent group contain the same point - the function returns whichever comes first in the array. Fix getSpatiallyHoveredGroup to return the DEEPEST (most specifically nested) group containing the point. Do this by finding ALL groups containing the point, then selecting the one with the greatest depth (using getDepth-style computation or checking which has no child groups also containing the point). Additionally, increase the movement threshold from 5 to something slightly more generous (like 5 is fine, but the real fix is the deepest-group logic).",
@@ -24,5 +24,5 @@
     "Run `cd /projects/sandbox/mind-map2 && npm run build` and confirm it succeeds with no errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes implemented successfully in a single commit. Build passes cleanly. No test framework to run additional tests."
 }
