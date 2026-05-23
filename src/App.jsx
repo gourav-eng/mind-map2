@@ -567,6 +567,7 @@ export default function WorkflowApp() {
       timestamp: Date.now()
     };
     localStorage.setItem('nexus-clipboard', JSON.stringify(clipData));
+    localStorage.removeItem('nexus-clipboard-group');
   }, [nodes, activeTab]);
 
   const cutNode = useCallback((nodeId) => {
@@ -580,6 +581,7 @@ export default function WorkflowApp() {
       timestamp: Date.now()
     };
     localStorage.setItem('nexus-clipboard', JSON.stringify(clipData));
+    localStorage.removeItem('nexus-clipboard-group');
   }, [nodes, activeTab]);
 
   const pasteNode = useCallback((targetX, targetY) => {
@@ -691,6 +693,7 @@ export default function WorkflowApp() {
       timestamp: Date.now()
     };
     localStorage.setItem('nexus-clipboard-group', JSON.stringify(clipData));
+    localStorage.removeItem('nexus-clipboard');
   }, [groups, nodes, edges, activeTab]);
 
   const cutGroup = useCallback((groupId) => {
@@ -720,6 +723,7 @@ export default function WorkflowApp() {
       timestamp: Date.now()
     };
     localStorage.setItem('nexus-clipboard-group', JSON.stringify(clipData));
+    localStorage.removeItem('nexus-clipboard');
   }, [groups, nodes, edges, activeTab]);
 
   const pasteGroup = useCallback((targetX, targetY) => {
@@ -999,7 +1003,10 @@ export default function WorkflowApp() {
     const getDepth = (g) => {
       let depth = 0;
       let curr = g;
+      const visited = new Set();
       while (curr && curr.parentGroupId) {
+        if (visited.has(curr.id)) break;
+        visited.add(curr.id);
         depth++;
         curr = groups.find(p => p.id === curr.parentGroupId);
       }
@@ -1656,13 +1663,11 @@ export default function WorkflowApp() {
       const allGroupIds = [rg.id, ...descendantGroupIds];
       const allNodeIds = [...descendantNodeIds, ...workingNodes.filter(n => n.groupId === rg.id).map(n => n.id)];
 
-      let minX = rgX;
       let maxX = rgX + 440;
 
       allNodeIds.forEach(nid => {
         const n = workingNodes.find(nd => nd.id === nid);
         if (n) {
-          minX = Math.min(minX, n.x);
           maxX = Math.max(maxX, n.x + 340);
         }
       });
@@ -1670,7 +1675,6 @@ export default function WorkflowApp() {
       allGroupIds.forEach(gid => {
         const g = workingGroups.find(gr => gr.id === gid);
         if (g) {
-          minX = Math.min(minX, g.x);
           maxX = Math.max(maxX, g.x + (g.width || 440));
         }
       });
