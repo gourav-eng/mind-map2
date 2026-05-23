@@ -278,6 +278,7 @@ export default function WorkflowApp() {
   // --- UI Layout Panels ---
   const [showSidebar, setShowSidebar] = useState(true);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
 
   // --- Dragging & Resizing Interactions ---
   const [draggingNode, setDraggingNode] = useState(null);
@@ -1438,16 +1439,56 @@ export default function WorkflowApp() {
           <div className="p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-xl text-white shadow-md shadow-indigo-100 shrink-0">
             <Network className="w-5 h-5" />
           </div>
-          <div>
-            <h1 className="text-base font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 leading-tight">
-              Nexus Workflow Workspace
-            </h1>
-            <p className="text-[10px] text-indigo-600 font-bold tracking-wider uppercase">UI/UX & PM NESTED CANVAS</p>
+
+          {/* Workspace Dropdown Selector */}
+          <div className="relative">
+            <button
+              onClick={() => setShowWorkspaceDropdown(!showWorkspaceDropdown)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 border border-slate-200 transition-colors min-w-[180px]"
+            >
+              <span className="text-sm font-semibold text-slate-700 truncate flex-1 text-left">
+                {activeWs?.name || 'Select Workspace'}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showWorkspaceDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showWorkspaceDropdown && (
+              <>
+                <div className="fixed inset-0 z-[99]" onClick={() => setShowWorkspaceDropdown(false)}></div>
+                <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100]">
+                  {workspaces.map(ws => (
+                    <button
+                      key={ws.id}
+                      onClick={() => { setActiveTab(ws.id); setShowWorkspaceDropdown(false); }}
+                      className={`w-full flex items-center px-4 py-2.5 text-sm font-medium transition-colors ${
+                        activeTab === ws.id 
+                          ? 'bg-indigo-50 text-indigo-700' 
+                          : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <FolderOpen className={`w-4 h-4 mr-2.5 shrink-0 ${activeTab === ws.id ? 'text-indigo-600' : 'text-slate-400'}`} />
+                      <span className="truncate">{ws.name}</span>
+                      {activeTab === ws.id && <Check className="w-4 h-4 ml-auto text-indigo-600 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
 
-        <div className="relative flex items-center">
+        <div className="relative flex items-center gap-1">
+          {/* Always-visible Undo/Redo buttons */}
+          <button onClick={performUndo} disabled={!canUndo} className={`p-2 rounded-lg transition-colors ${!canUndo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Undo">
+            <Undo2 className="w-5 h-5" />
+          </button>
+          <button onClick={performRedo} disabled={!canRedo} className={`p-2 rounded-lg transition-colors ${!canRedo ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`} title="Redo">
+            <Redo2 className="w-5 h-5" />
+          </button>
+
+          <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
           <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
           <button
             onClick={() => setShowMoreMenu(!showMoreMenu)}
@@ -1461,13 +1502,6 @@ export default function WorkflowApp() {
             <>
             <div className="fixed inset-0 z-[99]" onClick={() => setShowMoreMenu(false)}></div>
             <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100]">
-              <button onClick={() => { performUndo(); setShowMoreMenu(false); }} disabled={!canUndo} className={`w-full flex items-center px-4 py-2.5 text-sm font-medium transition-colors ${!canUndo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50'}`}>
-                <Undo2 className="w-4 h-4 mr-2.5" /> Undo
-              </button>
-              <button onClick={() => { performRedo(); setShowMoreMenu(false); }} disabled={!canRedo} className={`w-full flex items-center px-4 py-2.5 text-sm font-medium transition-colors ${!canRedo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50'}`}>
-                <Redo2 className="w-4 h-4 mr-2.5" /> Redo
-              </button>
-              <div className="h-px bg-slate-100 my-1 mx-3"></div>
               <button onClick={() => { disperseOverlappingNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                 <RefreshCw className="w-4 h-4 mr-2.5 text-indigo-500" /> Disperse Overlaps
               </button>
