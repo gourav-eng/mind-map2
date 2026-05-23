@@ -483,10 +483,8 @@ export default function WorkflowApp() {
       // Initialize password protection state
       const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
       const savedPassword = localStorage.getItem('nexus-password');
-      if (savedPasswordEnabled === 'true') {
+      if (savedPasswordEnabled === 'true' && savedPassword) {
         setPasswordEnabled(true);
-      }
-      if (savedPassword) {
         setStoredPassword(savedPassword);
       }
     } catch (e) {
