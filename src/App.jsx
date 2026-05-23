@@ -277,6 +277,7 @@ export default function WorkflowApp() {
 
   // --- UI Layout Panels ---
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // --- Dragging & Resizing Interactions ---
   const [draggingNode, setDraggingNode] = useState(null);
@@ -1446,59 +1447,43 @@ export default function WorkflowApp() {
         </div>
 
 
-        <div className="flex items-center gap-2">
-          {/* History Undo / Redo */}
-          <div className="flex items-center bg-slate-100 rounded-lg p-1 mr-1">
-            <button onClick={performUndo} disabled={!canUndo} className={`p-1.5 rounded-md transition-colors ${!canUndo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-white shadow-sm'}`} title="Undo (Ctrl+Z)"><Undo2 className="w-4 h-4" /></button>
-            <button onClick={performRedo} disabled={!canRedo} className={`p-1.5 rounded-md transition-colors ${!canRedo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-white shadow-sm'}`} title="Redo (Ctrl+Shift+Z)"><Redo2 className="w-4 h-4" /></button>
-          </div>
-
-          <button onClick={disperseOverlappingNodes} className="flex items-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-semibold rounded-lg border border-slate-200/85 transition-all" title="Slightly disperse overlapping elements">
-            <RefreshCw className="w-4 h-4 mr-1.5 text-indigo-500" /> Disperse Overlaps
-          </button>
-
-          <button onClick={autoAlignWorkspace} className="flex items-center px-3.5 py-2 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 text-sm font-semibold rounded-lg border border-slate-200/80 transition-all" title="Align canvas nicely">
-            <Sparkles className="w-4 h-4 mr-1.5 text-indigo-600 animate-pulse" /> Auto-Align Canvas
-          </button>
-
-          <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
+        <div className="relative flex items-center">
           <input type="file" accept=".json" ref={fileInputRef} onChange={handleImport} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg transition-colors" title="Import Map JSON">
-            <Upload className="w-4 h-4 mr-1.5" /> Import
-          </button>
-          <button onClick={exportData} className="flex items-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg transition-colors" title="Export Map JSON">
-            <Download className="w-4 h-4 mr-1.5" /> Export
-          </button>
-
-          <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
-          <button onClick={() => createGroup()} className="flex items-center px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-semibold rounded-lg transition-colors">
-            <Layers className="w-4 h-4 mr-1.5" /> New Group
-          </button>
-          <button onClick={() => addNode()} className="flex items-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg transition-all">
-            <Plus className="w-4 h-4 mr-1.5" /> Add Node
+          <button
+            onClick={() => setShowMoreMenu(!showMoreMenu)}
+            className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
+            title="More actions"
+          >
+            <MoreVertical className="w-5 h-5" />
           </button>
 
-          <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
-          {/* --- Dual Viewport Toggle --- */}
-          <div className="flex items-center bg-slate-100 rounded-xl p-1 gap-0.5">
-            <button
-              onClick={() => setViewMode('canvas')}
-              title="Canvas View"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'canvas' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <MonitorSpeaker className="w-3.5 h-3.5" /> Canvas
-            </button>
-            <button
-              onClick={() => setViewMode('outline')}
-              title="Outline Board View"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'outline' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <LayoutList className="w-3.5 h-3.5" /> Outline
-            </button>
-          </div>
+          {showMoreMenu && (
+            <>
+            <div className="fixed inset-0 z-[99]" onClick={() => setShowMoreMenu(false)}></div>
+            <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-[100]">
+              <button onClick={() => { performUndo(); setShowMoreMenu(false); }} disabled={!canUndo} className={`w-full flex items-center px-4 py-2.5 text-sm font-medium transition-colors ${!canUndo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <Undo2 className="w-4 h-4 mr-2.5" /> Undo
+              </button>
+              <button onClick={() => { performRedo(); setShowMoreMenu(false); }} disabled={!canRedo} className={`w-full flex items-center px-4 py-2.5 text-sm font-medium transition-colors ${!canRedo ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50'}`}>
+                <Redo2 className="w-4 h-4 mr-2.5" /> Redo
+              </button>
+              <div className="h-px bg-slate-100 my-1 mx-3"></div>
+              <button onClick={() => { disperseOverlappingNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                <RefreshCw className="w-4 h-4 mr-2.5 text-indigo-500" /> Disperse Overlaps
+              </button>
+              <button onClick={() => { autoAlignWorkspace(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                <Sparkles className="w-4 h-4 mr-2.5 text-indigo-600" /> Auto-Align Canvas
+              </button>
+              <div className="h-px bg-slate-100 my-1 mx-3"></div>
+              <button onClick={() => { createGroup(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
+                <Layers className="w-4 h-4 mr-2.5" /> New Group
+              </button>
+              <button onClick={() => { addNode(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
+                <Plus className="w-4 h-4 mr-2.5" /> Add Node
+              </button>
+            </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -1509,6 +1494,35 @@ export default function WorkflowApp() {
         {/* --- Left Sidebar --- */}
         {showSidebar && (
           <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200">
+            <div className="p-4 border-b border-slate-100">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Import Map JSON">
+                    <Upload className="w-4 h-4 mr-1.5" /> Import
+                  </button>
+                  <button onClick={exportData} className="flex-1 flex items-center justify-center px-3 py-2 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 transition-colors" title="Export Map JSON">
+                    <Download className="w-4 h-4 mr-1.5" /> Export
+                  </button>
+                </div>
+                <div className="flex items-center bg-slate-100 rounded-xl p-1 gap-0.5">
+                  <button
+                    onClick={() => setViewMode('canvas')}
+                    title="Canvas View"
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'canvas' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    <MonitorSpeaker className="w-3.5 h-3.5" /> Canvas
+                  </button>
+                  <button
+                    onClick={() => setViewMode('outline')}
+                    title="Outline Board View"
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'outline' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    <LayoutList className="w-3.5 h-3.5" /> Outline
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="p-4 border-b border-slate-100">
               <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Mind Map Workspaces</span>
               <div className="flex flex-col gap-1 max-h-36 overflow-y-auto custom-scrollbar pr-1">
