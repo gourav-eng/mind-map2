@@ -5,7 +5,7 @@ import {
   Download, Upload, Undo2, Redo2, Layers, Link2, ExternalLink, HelpCircle,
   Sparkles, CheckSquare, Clock, AlertCircle, BarChart2, PanelLeftClose, PanelLeft,
   Grid, Move, Copy, ArrowUp, ArrowDown, RefreshCw, LayoutList, MonitorSpeaker,
-  MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste
+  MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2
 } from 'lucide-react';
 
 // --- Premium Color Themes ---
@@ -1514,6 +1514,23 @@ export default function WorkflowApp() {
   };
 
 
+  // --- Collapse / Expand All Nodes ---
+  const collapseAllNodes = () => {
+    takeSnapshot();
+    updateActiveWorkspace(ws => ({
+      nodes: ws.nodes.map(n => ({ ...n, expanded: false })),
+      groups: computeLayout(ws.groups, ws.nodes.map(n => ({ ...n, expanded: false })))
+    }));
+  };
+
+  const expandAllNodes = () => {
+    takeSnapshot();
+    updateActiveWorkspace(ws => ({
+      nodes: ws.nodes.map(n => ({ ...n, expanded: true })),
+      groups: computeLayout(ws.groups, ws.nodes.map(n => ({ ...n, expanded: true })))
+    }));
+  };
+
   // --- Auto-Layout Engine ---
   const autoAlignWorkspace = () => {
     takeSnapshot();
@@ -1993,6 +2010,12 @@ export default function WorkflowApp() {
               <button onClick={() => { autoAlignWorkspace(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
                 <Sparkles className="w-4 h-4 mr-2.5 text-indigo-600" /> Auto-Align Canvas
               </button>
+              <button onClick={() => { collapseAllNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                <Minimize2 className="w-4 h-4 mr-2.5 text-amber-600" /> Collapse All Nodes
+              </button>
+              <button onClick={() => { expandAllNodes(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                <Maximize2 className="w-4 h-4 mr-2.5 text-emerald-600" /> Expand All Nodes
+              </button>
               <div className="h-px bg-slate-100 my-1 mx-3"></div>
               <button onClick={() => { createGroup(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
                 <Layers className="w-4 h-4 mr-2.5" /> New Group
@@ -2180,7 +2203,7 @@ export default function WorkflowApp() {
         {/* --- Main Workspace Canvas Area --- */}
         <main
           ref={workspaceRef}
-          className="flex-1 relative overflow-hidden bg-[#fafafa] touch-none text-slate-800"
+          className="flex-1 relative overflow-hidden bg-[#1e1e2e] touch-none text-slate-800"
           onPointerDown={handlePointerDownMain}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -2194,7 +2217,7 @@ export default function WorkflowApp() {
         >
           {/* Panning grid backdrop */}
           <div className="absolute inset-0 canvas-grid-clickable cursor-crosshair active:cursor-grabbing opacity-60" style={{
-            backgroundImage: 'radial-gradient(#94a3b8 1.5px, transparent 1.5px)',
+            backgroundImage: 'radial-gradient(#4a5568 1.5px, transparent 1.5px)',
             backgroundSize: `${24 * transform.scale}px ${24 * transform.scale}px`,
             backgroundPosition: `${transform.x}px ${transform.y}px`
           }} />
