@@ -2130,7 +2130,7 @@ export default function WorkflowApp() {
 
         {/* --- Left Sidebar --- */}
         {showSidebar && (
-          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none">
+          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
