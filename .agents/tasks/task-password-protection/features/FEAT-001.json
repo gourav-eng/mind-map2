@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add password protection system to the mind map app. When enabled, the app shows a password prompt on every page load/refresh. Password settings are managed in the sidebar with a toggle to enable/disable protection and an input to set/change the password. All state persists in localStorage.",
+  "status": "completed",
+  "steps": [
+    "In src/App.jsx, add new state variables: `passwordEnabled` (boolean), `storedPassword` (string), and `isAuthenticated` (boolean, starts false). Initialize from localStorage keys 'nexus-password-enabled' and 'nexus-password' during the existing useEffect initialization block (around line 480).",
+    "Create a PasswordGate component (can be defined inline in the same file above the WorkflowApp export, or as a separate rendered section). It should: show a full-screen overlay with a password input field and a submit button. On submit, compare the entered password with the stored password. If correct, set isAuthenticated to true. If incorrect, show an error message. Style with Tailwind CSS matching the app's premium look (slate/indigo palette, rounded corners, subtle shadows).",
+    "In the main render of WorkflowApp, add a conditional check early in the return: if `passwordEnabled` is true AND `isAuthenticated` is false, render the PasswordGate overlay instead of the normal app content. The PasswordGate should block all access to the app.",
+    "In the sidebar (the <aside> element that renders when showSidebar is true), add a new section titled 'Security' (or 'Password Protection') between the 'Task Completion Stats' section and the 'Nodes Directory Explorer' section. This section should contain: (a) A toggle switch (styled as a sliding pill/button) to enable/disable password protection (`passwordEnabled` state). (b) When enabled, show an input field to set/change the password with a save button. Use lucide-react icons like Lock or Shield for visual consistency.",
+    "When the toggle is turned ON and no password is set yet, prompt the user to set a password (show the input field). When toggled OFF, clear the authenticated state so next time it is toggled ON, the user will need to re-enter.",
+    "Persist `passwordEnabled` and `storedPassword` to localStorage whenever they change (similar pattern to the existing auto-save useEffect). Use keys 'nexus-password-enabled' and 'nexus-password'.",
+    "Import any needed lucide-react icons (Lock, Shield, Eye, EyeOff, or similar) at the top of App.jsx alongside existing imports."
+  ],
+  "acceptance_criteria": [
+    "Running `npm run build` succeeds without errors",
+    "When passwordEnabled is true in localStorage and the page loads, a password prompt is shown before the app content",
+    "Entering the correct password dismisses the prompt and shows the app",
+    "Entering an incorrect password shows an error message and does not dismiss the prompt",
+    "The sidebar contains a 'Password Protection' section with a toggle and password input",
+    "Toggling the protection OFF means no password prompt on next load",
+    "Password and enabled state persist across page refreshes via localStorage"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/mind-map2 && npm run build` and confirm it succeeds with exit code 0"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes successfully. Used showPasswordInput for sidebar password input visibility and showGatePassword for the password gate eye toggle to avoid naming conflicts. The password gate is placed as an early return before the main component return but after all hooks and const assignments."
+}

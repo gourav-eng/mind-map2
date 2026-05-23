@@ -5,7 +5,8 @@ import {
   Download, Upload, Undo2, Redo2, Layers, Link2, ExternalLink, HelpCircle,
   Sparkles, CheckSquare, Clock, AlertCircle, BarChart2, PanelLeftClose, PanelLeft,
   Grid, Move, Copy, ArrowUp, ArrowDown, RefreshCw, LayoutList, MonitorSpeaker,
-  MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2
+  MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2,
+  Lock, Shield, Eye, EyeOff
 } from 'lucide-react';
 
 // --- Premium Color Themes ---
@@ -323,6 +324,16 @@ export default function WorkflowApp() {
   const [mobileSheet, setMobileSheet] = useState(null);
   const [expandedOutlineCards, setExpandedOutlineCards] = useState({});
 
+  // --- Password Protection ---
+  const [passwordEnabled, setPasswordEnabled] = useState(false);
+  const [storedPassword, setStoredPassword] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [showGatePassword, setShowGatePassword] = useState(false);
+
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
   const nodeTapRef = useRef(null);
@@ -468,6 +479,14 @@ export default function WorkflowApp() {
       setWorkspaces(initialWorkspaces);
       setActiveTab(initialTab);
       setNextId(initialNextId);
+
+      // Initialize password protection state
+      const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
+      const savedPassword = localStorage.getItem('nexus-password');
+      if (savedPasswordEnabled === 'true' && savedPassword) {
+        setPasswordEnabled(true);
+        setStoredPassword(savedPassword);
+      }
     } catch (e) {
       setWorkspaces(defaultWorkspaces);
       setActiveTab('ws-1');
@@ -487,6 +506,13 @@ export default function WorkflowApp() {
       localStorage.setItem('premium-counter', nextId.toString());
     }
   }, [workspaces, activeTab, nextId, initialized]);
+
+  useEffect(() => {
+    if (initialized) {
+      localStorage.setItem('nexus-password-enabled', passwordEnabled ? 'true' : 'false');
+      localStorage.setItem('nexus-password', storedPassword);
+    }
+  }, [passwordEnabled, storedPassword, initialized]);
 
   useEffect(() => {
     setFocusedNodeId(null);
@@ -1932,6 +1958,59 @@ export default function WorkflowApp() {
     </div>
   );
 
+  if (passwordEnabled && !isAuthenticated) {
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 w-full max-w-sm mx-4">
+          <div className="flex flex-col items-center mb-6">
+            <div className="p-3 bg-indigo-50 rounded-xl mb-3">
+              <Shield className="w-8 h-8 text-indigo-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-800">Password Required</h2>
+            <p className="text-sm text-slate-500 mt-1">Enter your password to access the app</p>
+          </div>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (passwordInput === storedPassword) {
+              setIsAuthenticated(true);
+              setPasswordInput('');
+              setPasswordError('');
+            } else {
+              setPasswordError('Incorrect password. Please try again.');
+            }
+          }}>
+            <div className="relative mb-3">
+              <input
+                type={showGatePassword ? 'text' : 'password'}
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                placeholder="Enter password"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent pr-10"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowGatePassword(!showGatePassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showGatePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            {passwordError && (
+              <p className="text-xs text-red-500 mb-3">{passwordError}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-md transition-colors"
+            >
+              Unlock
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen w-full bg-[#f8fafc] font-sans text-slate-800 selection:bg-indigo-100 overflow-hidden">
       
@@ -2051,7 +2130,7 @@ export default function WorkflowApp() {
 
         {/* --- Left Sidebar --- */}
         {showSidebar && (
-          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none">
+          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -2155,6 +2234,67 @@ export default function WorkflowApp() {
                     <div className="text-slate-400 font-medium">Total Tasks</div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* --- Password Protection Section --- */}
+            <div className="p-4 border-b border-slate-100">
+              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Password Protection</span>
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-indigo-500" />
+                    <span className="text-xs font-semibold text-slate-700">Enable Protection</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (passwordEnabled) {
+                        setPasswordEnabled(false);
+                        setIsAuthenticated(false);
+                      } else {
+                        if (storedPassword) {
+                          setPasswordEnabled(true);
+                        } else {
+                          setShowPasswordInput(true);
+                        }
+                      }
+                    }}
+                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${passwordEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${passwordEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+                {(showPasswordInput || (passwordEnabled && storedPassword)) && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200">
+                    <label className="text-xs font-medium text-slate-500">
+                      {storedPassword ? 'Change Password' : 'Set Password'}
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder={storedPassword ? 'New password' : 'Enter password'}
+                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newPasswordInput.trim()) {
+                            setStoredPassword(newPasswordInput.trim());
+                            setNewPasswordInput('');
+                            if (!passwordEnabled) {
+                              setPasswordEnabled(true);
+                            }
+                            setShowPasswordInput(false);
+                          }
+                        }}
+                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2390,7 +2530,7 @@ export default function WorkflowApp() {
             })}
 
             {/* --- Connecting Dynamic Paths --- */}
-            <svg className="absolute overflow-visible w-full h-full z-0">
+            <svg className="absolute overflow-visible w-full h-full z-30">
               <defs>
                 {Object.entries(THEMES).map(([key, theme]) => (
                   <marker key={key} id={`arrow-${key}`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
