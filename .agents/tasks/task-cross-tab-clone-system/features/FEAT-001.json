@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Fix clone location panel to show ALL connections (not just the first), and implement cross-workspace clone system with 'Clone to Another Tab' UI option",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Fix Location Panel Edge Display Bug: In src/App.jsx around line 3110, the Clone Locations panel uses `edges.find(e => e.target === instance.id)` and `edges.find(e => e.source === instance.id)` which only returns the FIRST matching edge. Replace with `edges.filter(...)` to get ALL incoming and outgoing edges. Then update the rendering below to show all connections (multiple prev nodes and multiple next nodes) for each clone instance. Show them as a list of connections rather than a single prev->clone->next line.",
     "Step 2 - Make Clone Panel Work Across All Workspaces: Currently `sourceNodes` and `cloneInstances` in the clone panel (line ~3055) only search the active workspace's `nodes`. Change this to search ALL workspaces. Replace `const sourceNodes = nodes.filter(...)` with a version that iterates over `workspaces` array to find all source nodes that have clones in ANY workspace. Similarly, `cloneInstances` should gather instances from ALL workspaces. For each instance in the location panel, show which workspace it belongs to (workspace name label).",
@@ -23,5 +23,5 @@
   ],
   "verification": ["npm run build"],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 steps implemented successfully. Build passes with no errors. Key changes: (1) Clone locations panel now uses edges.filter() to show ALL connections, (2) Clone panel searches all workspaces for sources and instances, (3) updateNode syncs clones across all workspaces using setWorkspaces, (4) Added Clone to Tab context menu with workspace picker, (5) Clicking clone in another workspace switches tabs and focuses the node. Added cloneToTabMenu state for the nested workspace picker."
 }
