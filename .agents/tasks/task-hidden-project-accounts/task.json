@@ -1,0 +1,7 @@
+{
+  "task_id": "task-hidden-project-accounts",
+  "task_description": "Implement a secret multi-project/account system where each project is an isolated collection of workspaces with its own password. The entire multi-project system is hidden - no visible UI reveals its existence. Project management (create, switch, delete) is accessed only through secret keyboard shortcuts (Ctrl+Shift+P) or a hidden gesture (triple-tap logo). Each project's data is fully isolated.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

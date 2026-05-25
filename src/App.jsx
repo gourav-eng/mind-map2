@@ -335,9 +335,19 @@ export default function WorkflowApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [showPasswordInput, setShowPasswordInput] = useState(false);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
   const [showGatePassword, setShowGatePassword] = useState(false);
+
+  // --- Hidden Project System ---
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState('');
+  const [showProjectPanel, setShowProjectPanel] = useState(false);
+  const [projectPanelMode, setProjectPanelMode] = useState('main'); // main, create, switch, delete, changePassword
+  const [projectNameInput, setProjectNameInput] = useState('');
+  const [projectPasswordInput, setProjectPasswordInput] = useState('');
+  const [projectPasswordConfirm, setProjectPasswordConfirm] = useState('');
+  const [projectError, setProjectError] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const logoTapRef = useRef({ count: 0, lastTap: 0 });
 
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
@@ -452,47 +462,106 @@ export default function WorkflowApp() {
   // --- Initialization & Auto-Save ---
   useEffect(() => {
     try {
-      const savedWs = localStorage.getItem('premium-workspaces');
-      const savedTab = localStorage.getItem('premium-active-tab');
-      const savedCounter = localStorage.getItem('premium-counter');
+      // Check for new project system first
+      const savedAppState = localStorage.getItem('nexus-app-state');
+      const savedActiveProject = localStorage.getItem('nexus-active-project');
 
-      let initialWorkspaces = defaultWorkspaces;
-      let initialTab = 'ws-1';
-      let initialNextId = 10;
+      if (savedAppState) {
+        // Load from new project system
+        const parsedProjects = JSON.parse(savedAppState);
+        if (parsedProjects && Array.isArray(parsedProjects) && parsedProjects.length > 0) {
+          setProjects(parsedProjects);
+          const activeId = savedActiveProject || parsedProjects[0].id;
+          setActiveProjectId(activeId);
+          const activeProj = parsedProjects.find(p => p.id === activeId) || parsedProjects[0];
+          
+          let initialWorkspaces = activeProj.workspaces || defaultWorkspaces;
+          initialWorkspaces = initialWorkspaces.map(ws => {
+            const grps = ws.groups || [];
+            const nds = ws.nodes || [];
+            return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+          });
+          
+          setWorkspaces(initialWorkspaces);
+          setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
+          setNextId(activeProj.nextId || 10);
+          
+          // Password from current project
+          if (activeProj.password) {
+            setPasswordEnabled(true);
+            setStoredPassword(activeProj.password);
+          }
+        }
+      } else {
+        // Migration from old localStorage keys
+        const savedWs = localStorage.getItem('premium-workspaces');
+        const savedTab = localStorage.getItem('premium-active-tab');
+        const savedCounter = localStorage.getItem('premium-counter');
+        const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
+        const savedPassword = localStorage.getItem('nexus-password');
 
-      if (savedWs) {
-         const parsedWs = JSON.parse(savedWs);
-         if (parsedWs && Array.isArray(parsedWs)) {
-             initialWorkspaces = parsedWs.map(ws => {
-               const grps = ws.groups || [];
-               const nds = ws.nodes || [];
-               return {
-                 ...ws,
-                 groups: computeLayout(grps, nds),
-                 nodes: nds,
-                 edges: ws.edges || []
-               };
-             });
-         }
-      }
-      
-      if (savedTab) initialTab = savedTab;
-      else if (initialWorkspaces.length > 0) initialTab = initialWorkspaces[0].id;
-      
-      if (savedCounter) initialNextId = parseInt(savedCounter, 10) || 10;
+        let initialWorkspaces = defaultWorkspaces;
+        let initialTab = 'ws-1';
+        let initialNextId = 10;
 
-      setWorkspaces(initialWorkspaces);
-      setActiveTab(initialTab);
-      setNextId(initialNextId);
+        if (savedWs) {
+          const parsedWs = JSON.parse(savedWs);
+          if (parsedWs && Array.isArray(parsedWs)) {
+            initialWorkspaces = parsedWs.map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            });
+          }
+        }
+        
+        if (savedTab) initialTab = savedTab;
+        else if (initialWorkspaces.length > 0) initialTab = initialWorkspaces[0].id;
+        
+        if (savedCounter) initialNextId = parseInt(savedCounter, 10) || 10;
 
-      // Initialize password protection state
-      const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
-      const savedPassword = localStorage.getItem('nexus-password');
-      if (savedPasswordEnabled === 'true' && savedPassword) {
-        setPasswordEnabled(true);
-        setStoredPassword(savedPassword);
+        // Build default project from migrated data
+        const migratedPassword = (savedPasswordEnabled === 'true' && savedPassword) ? savedPassword : '';
+        const defaultProject = {
+          id: 'proj-default',
+          name: 'Default',
+          password: migratedPassword,
+          workspaces: initialWorkspaces,
+          activeTab: initialTab,
+          nextId: initialNextId
+        };
+
+        setProjects([defaultProject]);
+        setActiveProjectId('proj-default');
+        setWorkspaces(initialWorkspaces);
+        setActiveTab(initialTab);
+        setNextId(initialNextId);
+
+        if (migratedPassword) {
+          setPasswordEnabled(true);
+          setStoredPassword(migratedPassword);
+        }
+
+        // Save to new format and clean up old keys
+        localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
+        localStorage.setItem('nexus-active-project', 'proj-default');
+        localStorage.removeItem('premium-workspaces');
+        localStorage.removeItem('premium-active-tab');
+        localStorage.removeItem('premium-counter');
+        localStorage.removeItem('nexus-password-enabled');
+        localStorage.removeItem('nexus-password');
       }
     } catch (e) {
+      const defaultProject = {
+        id: 'proj-default',
+        name: 'Default',
+        password: '',
+        workspaces: defaultWorkspaces,
+        activeTab: 'ws-1',
+        nextId: 10
+      };
+      setProjects([defaultProject]);
+      setActiveProjectId('proj-default');
       setWorkspaces(defaultWorkspaces);
       setActiveTab('ws-1');
       setNextId(10);
@@ -505,23 +574,56 @@ export default function WorkflowApp() {
   }, [workspaces, activeTab, nextId]);
 
   useEffect(() => {
-    if (initialized) {
-      localStorage.setItem('premium-workspaces', JSON.stringify(workspaces));
-      localStorage.setItem('premium-active-tab', activeTab);
-      localStorage.setItem('premium-counter', nextId.toString());
+    if (initialized && activeProjectId) {
+      setProjects(prev => {
+        const updated = prev.map(p => p.id === activeProjectId 
+          ? { ...p, workspaces, activeTab, nextId }
+          : p
+        );
+        localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+        return updated;
+      });
+      localStorage.setItem('nexus-active-project', activeProjectId);
     }
-  }, [workspaces, activeTab, nextId, initialized]);
+  }, [workspaces, activeTab, nextId, initialized, activeProjectId]);
 
   useEffect(() => {
-    if (initialized) {
-      localStorage.setItem('nexus-password-enabled', passwordEnabled ? 'true' : 'false');
-      localStorage.setItem('nexus-password', storedPassword);
+    if (initialized && activeProjectId) {
+      setProjects(prev => {
+        const updated = prev.map(p => p.id === activeProjectId
+          ? { ...p, password: storedPassword }
+          : p
+        );
+        localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+        return updated;
+      });
     }
-  }, [passwordEnabled, storedPassword, initialized]);
+  }, [storedPassword, initialized, activeProjectId]);
 
   useEffect(() => {
     setFocusedNodeId(null);
   }, [activeTab]);
+
+  // --- Secret Keyboard Shortcut (Ctrl+Shift+P) and Escape dismiss ---
+  useEffect(() => {
+    const handleSecretKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        setShowProjectPanel(true);
+        setProjectPanelMode('main');
+        setProjectError('');
+        setProjectNameInput('');
+        setProjectPasswordInput('');
+        setProjectPasswordConfirm('');
+        setSelectedProjectId(null);
+      }
+      if (e.key === 'Escape' && showProjectPanel) {
+        setShowProjectPanel(false);
+      }
+    };
+    window.addEventListener('keydown', handleSecretKey);
+    return () => window.removeEventListener('keydown', handleSecretKey);
+  }, [showProjectPanel]);
 
   // --- Auto-hide sidebar on small screens ---
   useEffect(() => {
@@ -929,6 +1031,166 @@ export default function WorkflowApp() {
   const renameWorkspace = (id, newName) => {
     setWorkspaces(prev => prev.map(ws => ws.id === id ? { ...ws, name: newName } : ws));
     setEditingTab(null);
+  };
+
+  // --- Project Management Functions ---
+  const openProjectPanel = () => {
+    setShowProjectPanel(true);
+    setProjectPanelMode('main');
+    setProjectError('');
+    setProjectNameInput('');
+    setProjectPasswordInput('');
+    setProjectPasswordConfirm('');
+    setSelectedProjectId(null);
+  };
+
+  const handleLogoTap = () => {
+    const now = Date.now();
+    const ref = logoTapRef.current;
+    if (now - ref.lastTap < 1000) {
+      ref.count += 1;
+    } else {
+      ref.count = 1;
+    }
+    ref.lastTap = now;
+    if (ref.count >= 3) {
+      ref.count = 0;
+      openProjectPanel();
+    }
+  };
+
+  const createProject = () => {
+    if (!projectNameInput.trim() || !projectPasswordInput.trim()) {
+      setProjectError('Both fields required.');
+      return;
+    }
+    const newProj = {
+      id: `proj-${Date.now()}`,
+      name: projectNameInput.trim(),
+      password: projectPasswordInput.trim(),
+      workspaces: [{ id: `ws-${Date.now()}`, name: 'Workspace 1', nodes: [], edges: [], groups: [] }],
+      activeTab: `ws-${Date.now()}`,
+      nextId: 10
+    };
+    // Fix activeTab to match workspace id
+    newProj.activeTab = newProj.workspaces[0].id;
+    setProjects(prev => {
+      const updated = [...prev, newProj];
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    setProjectError('');
+    setProjectPanelMode('main');
+    setProjectNameInput('');
+    setProjectPasswordInput('');
+  };
+
+  const switchProject = (targetId) => {
+    const target = projects.find(p => p.id === targetId);
+    if (!target) return;
+    if (projectPasswordInput !== target.password) {
+      setProjectError('Incorrect.');
+      return;
+    }
+    // Save current project state
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId
+        ? { ...p, workspaces, activeTab, nextId }
+        : p
+      );
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    // Load target project
+    let targetWorkspaces = target.workspaces || defaultWorkspaces;
+    targetWorkspaces = targetWorkspaces.map(ws => {
+      const grps = ws.groups || [];
+      const nds = ws.nodes || [];
+      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+    });
+    setActiveProjectId(targetId);
+    setWorkspaces(targetWorkspaces);
+    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
+    setNextId(target.nextId || 10);
+    setStoredPassword(target.password || '');
+    setPasswordEnabled(!!target.password);
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', targetId);
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+    setTransform({ x: 0, y: 0, scale: 1 });
+    // Reset history
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  };
+
+  const deleteProject = (targetId) => {
+    const target = projects.find(p => p.id === targetId);
+    if (!target) return;
+    if (projects.length <= 1) {
+      setProjectError('Cannot remove the only entry.');
+      return;
+    }
+    if (projectPasswordInput !== target.password) {
+      setProjectError('Incorrect.');
+      return;
+    }
+    const updated = projects.filter(p => p.id !== targetId);
+    setProjects(updated);
+    localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+    // If deleting active project, switch to first available
+    if (targetId === activeProjectId) {
+      const next = updated[0];
+      setActiveProjectId(next.id);
+      let nextWorkspaces = next.workspaces || defaultWorkspaces;
+      nextWorkspaces = nextWorkspaces.map(ws => {
+        const grps = ws.groups || [];
+        const nds = ws.nodes || [];
+        return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+      });
+      setWorkspaces(nextWorkspaces);
+      setActiveTab(next.activeTab || (nextWorkspaces.length > 0 ? nextWorkspaces[0].id : ''));
+      setNextId(next.nextId || 10);
+      setStoredPassword(next.password || '');
+      setPasswordEnabled(!!next.password);
+      setIsAuthenticated(!!next.password);
+      localStorage.setItem('nexus-active-project', next.id);
+    }
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+  };
+
+  const changeProjectPassword = () => {
+    if (!projectPasswordInput.trim()) {
+      setProjectError('Current password required.');
+      return;
+    }
+    const current = projects.find(p => p.id === activeProjectId);
+    if (!current) return;
+    if (projectPasswordInput !== current.password) {
+      setProjectError('Incorrect current password.');
+      return;
+    }
+    if (!projectPasswordConfirm.trim()) {
+      setProjectError('New password required.');
+      return;
+    }
+    const newPass = projectPasswordConfirm.trim();
+    setStoredPassword(newPass);
+    setPasswordEnabled(!!newPass);
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId ? { ...p, password: newPass } : p);
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectPasswordConfirm('');
+    setProjectError('');
   };
 
   // --- Import / Export ---
@@ -2127,6 +2389,65 @@ export default function WorkflowApp() {
             </button>
           </form>
         </div>
+        {showProjectPanel && (
+          <>
+            <div className="fixed inset-0 z-[10000] bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowProjectPanel(false)} />
+            <div className="fixed inset-0 z-[10001] flex items-center justify-center pointer-events-none">
+              <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto">
+                {projectPanelMode === 'main' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-center mb-2">
+                      <Lock className="w-5 h-5 text-slate-400" />
+                    </div>
+                    {projects.length > 1 && (
+                      <button onClick={() => { setProjectPanelMode('switch'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                        Switch
+                      </button>
+                    )}
+                    <button onClick={() => setShowProjectPanel(false)} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                {projectPanelMode === 'switch' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-center mb-2">
+                      <Lock className="w-5 h-5 text-slate-400" />
+                    </div>
+                    {!selectedProjectId ? (
+                      <div className="space-y-2">
+                        {projects.filter(p => p.id !== activeProjectId).map(p => (
+                          <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left">
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <input
+                          type="password"
+                          value={projectPasswordInput}
+                          onChange={(e) => setProjectPasswordInput(e.target.value)}
+                          placeholder="Enter key"
+                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
+                        />
+                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                          Confirm
+                        </button>
+                      </div>
+                    )}
+                    <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                      Back
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -2145,7 +2466,7 @@ export default function WorkflowApp() {
             {showSidebar ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeft className="w-5 h-5" />}
           </button>
           
-          <div className="p-2 sm:p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-lg sm:rounded-xl text-white shadow-md shadow-indigo-100 shrink-0">
+          <div className="p-2 sm:p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-lg sm:rounded-xl text-white shadow-md shadow-indigo-100 shrink-0 cursor-pointer select-none" onClick={handleLogoTap}>
             <Network className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
 
@@ -2364,67 +2685,6 @@ export default function WorkflowApp() {
                     <div className="text-slate-400 font-medium">Total Tasks</div>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* --- Password Protection Section --- */}
-            <div className="p-4 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Password Protection</span>
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-indigo-500" />
-                    <span className="text-xs font-semibold text-slate-700">Enable Protection</span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (passwordEnabled) {
-                        setPasswordEnabled(false);
-                        setIsAuthenticated(false);
-                      } else {
-                        if (storedPassword) {
-                          setPasswordEnabled(true);
-                        } else {
-                          setShowPasswordInput(true);
-                        }
-                      }
-                    }}
-                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${passwordEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${passwordEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-                {(showPasswordInput || (passwordEnabled && storedPassword)) && (
-                  <div className="space-y-2 pt-2 border-t border-slate-200">
-                    <label className="text-xs font-medium text-slate-500">
-                      {storedPassword ? 'Change Password' : 'Set Password'}
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={newPasswordInput}
-                        onChange={(e) => setNewPasswordInput(e.target.value)}
-                        placeholder={storedPassword ? 'New password' : 'Enter password'}
-                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                      <button
-                        onClick={() => {
-                          if (newPasswordInput.trim()) {
-                            setStoredPassword(newPasswordInput.trim());
-                            setNewPasswordInput('');
-                            if (!passwordEnabled) {
-                              setPasswordEnabled(true);
-                            }
-                            setShowPasswordInput(false);
-                          }
-                        }}
-                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -3448,6 +3708,177 @@ export default function WorkflowApp() {
           </div>
         );
       })()}
+
+      {/* --- Secret Project Panel --- */}
+      {showProjectPanel && (
+        <>
+          <div className="fixed inset-0 z-[9998] bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowProjectPanel(false)} />
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto" onKeyDown={(e) => { if (e.key === 'Escape') setShowProjectPanel(false); }}>
+              
+              {projectPanelMode === 'main' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center mb-2">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <button onClick={() => { setProjectPanelMode('create'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                    New
+                  </button>
+                  {projects.length > 1 && (
+                    <button onClick={() => { setProjectPanelMode('switch'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                      Switch
+                    </button>
+                  )}
+                  {projects.length > 1 && (
+                    <button onClick={() => { setProjectPanelMode('delete'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors">
+                      Remove
+                    </button>
+                  )}
+                  <button onClick={() => { setProjectPanelMode('changePassword'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                    Change Key
+                  </button>
+                  <button onClick={() => setShowProjectPanel(false)} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {projectPanelMode === 'create' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center mb-2">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    value={projectNameInput}
+                    onChange={(e) => setProjectNameInput(e.target.value)}
+                    placeholder="Name"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    autoFocus
+                  />
+                  <input
+                    type="password"
+                    value={projectPasswordInput}
+                    onChange={(e) => setProjectPasswordInput(e.target.value)}
+                    placeholder="Key"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                  {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                  <button onClick={createProject} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                    Confirm
+                  </button>
+                  <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                    Back
+                  </button>
+                </div>
+              )}
+
+              {projectPanelMode === 'switch' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center mb-2">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  {!selectedProjectId ? (
+                    <div className="space-y-2">
+                      {projects.filter(p => p.id !== activeProjectId).map(p => (
+                        <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left">
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <input
+                        type="password"
+                        value={projectPasswordInput}
+                        onChange={(e) => setProjectPasswordInput(e.target.value)}
+                        placeholder="Enter key"
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
+                      />
+                      {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                      <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                        Confirm
+                      </button>
+                    </div>
+                  )}
+                  <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                    Back
+                  </button>
+                </div>
+              )}
+
+              {projectPanelMode === 'delete' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center mb-2">
+                    <Lock className="w-5 h-5 text-red-400" />
+                  </div>
+                  {!selectedProjectId ? (
+                    <div className="space-y-2">
+                      {projects.filter(p => p.id !== activeProjectId || projects.length > 1).map(p => (
+                        <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors text-left">
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-500 text-center">Confirm removal</p>
+                      <input
+                        type="password"
+                        value={projectPasswordInput}
+                        onChange={(e) => setProjectPasswordInput(e.target.value)}
+                        placeholder="Enter key to confirm"
+                        className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === 'Enter') deleteProject(selectedProjectId); }}
+                      />
+                      {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                      <button onClick={() => deleteProject(selectedProjectId)} className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                  <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                    Back
+                  </button>
+                </div>
+              )}
+
+              {projectPanelMode === 'changePassword' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center mb-2">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type="password"
+                    value={projectPasswordInput}
+                    onChange={(e) => setProjectPasswordInput(e.target.value)}
+                    placeholder="Current key"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    autoFocus
+                  />
+                  <input
+                    type="password"
+                    value={projectPasswordConfirm}
+                    onChange={(e) => setProjectPasswordConfirm(e.target.value)}
+                    placeholder="New key"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                  {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                  <button onClick={changeProjectPassword} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                    Update
+                  </button>
+                  <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                    Back
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes dash { to { stroke-dashoffset: -14; } }
