@@ -359,6 +359,7 @@ export default function WorkflowApp() {
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const logoTapRef = useRef({ count: 0, lastTap: 0 });
   const saveTimerRef = useRef(null);
+  const projectsRef = useRef([]);
 
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
@@ -601,6 +602,11 @@ export default function WorkflowApp() {
     stateRef.current = { workspaces, activeTab, nextId };
   }, [workspaces, activeTab, nextId]);
 
+  // Keep projectsRef in sync with projects state for debounced localStorage writes
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
   useEffect(() => {
     if (initialized && activeProjectId) {
       setProjects(prev => {
@@ -608,13 +614,14 @@ export default function WorkflowApp() {
           ? { ...p, workspaces, activeTab, nextId }
           : p
         );
-        // Debounce localStorage write
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-          localStorage.setItem('nexus-app-state', JSON.stringify(updated));
-        }, 500);
         return updated;
       });
+      // Debounced localStorage write (outside state updater)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const currentProjects = projectsRef.current;
+        localStorage.setItem('nexus-app-state', JSON.stringify(currentProjects));
+      }, 500);
       localStorage.setItem('nexus-active-project', activeProjectId);
     }
   }, [workspaces, activeTab, nextId, initialized, activeProjectId]);
@@ -626,13 +633,14 @@ export default function WorkflowApp() {
           ? { ...p, password: storedPassword }
           : p
         );
-        // Debounce localStorage write
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-          localStorage.setItem('nexus-app-state', JSON.stringify(updated));
-        }, 500);
         return updated;
       });
+      // Debounced localStorage write (outside state updater)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const currentProjects = projectsRef.current;
+        localStorage.setItem('nexus-app-state', JSON.stringify(currentProjects));
+      }, 500);
     }
   }, [storedPassword, initialized, activeProjectId]);
 
@@ -1201,7 +1209,7 @@ export default function WorkflowApp() {
       setNextId(next.nextId || 10);
       setStoredPassword(next.password || '');
       setPasswordEnabled(!!next.password);
-      setIsAuthenticated(!!next.password);
+      setIsAuthenticated(false);
       localStorage.setItem('nexus-active-project', next.id);
     }
     setShowProjectPanel(false);
