@@ -1,0 +1,28 @@
+{
+  "project_type": "React SPA mind map application (single-file App.jsx, ~3463 lines)",
+  "language": "JavaScript/JSX",
+  "build_system": "Vite with React plugin, Tailwind CSS for styling",
+  "test_framework": "None - no test infrastructure exists",
+  "build_command": "npm run build",
+  "test_command": "No tests exist - verify via build only",
+  "verification_instructions": "Run `npm run build` to confirm no compilation/bundling errors. Visually inspect code logic for correctness.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/mind-map2 && npm install",
+  "environment_constraints": "No test framework. Single-file React app (src/App.jsx is ~3463 lines). Uses localStorage for persistence. Uses lucide-react for icons. Uses Tailwind CSS classes for all styling.",
+  "contribution_requirements": "No CONTRIBUTING.md exists. Follow existing code patterns - inline Tailwind CSS, functional components with hooks, localStorage for persistence.",
+  "key_patterns": "All app state is in the WorkflowApp component. State uses useState/useRef/useCallback hooks. Workspaces are stored as array in state and persisted to localStorage with 'premium-workspaces' key. Password protection uses 'nexus-password' and 'nexus-password-enabled' keys in localStorage. The activeTab state selects which workspace is shown. The sidebar has sections for import/export, view toggle, workspace list, task stats, password settings, and nodes directory. Icons come from lucide-react.",
+  "relevant_files": [
+    "src/App.jsx"
+  ],
+  "directory_structure": "Single src directory with App.jsx (main component ~3463 lines), main.jsx (entry point), index.css (Tailwind directives). All application logic is in App.jsx.",
+  "existing_password_system": {
+    "state_vars": ["passwordEnabled", "storedPassword", "isAuthenticated", "passwordInput", "passwordError", "showPasswordInput", "newPasswordInput", "showGatePassword"],
+    "localStorage_keys": ["nexus-password-enabled", "nexus-password"],
+    "behavior": "When passwordEnabled is true and user is not authenticated, shows a full-screen lock gate. Password is stored in plain text in localStorage. Toggle and password set UI is in the sidebar under 'Password Protection' section."
+  },
+  "existing_workspace_system": {
+    "state_vars": ["workspaces (array)", "activeTab (string id)"],
+    "localStorage_keys": ["premium-workspaces", "premium-active-tab", "premium-counter"],
+    "behavior": "Workspaces stored as array of {id, name, nodes, edges, groups}. activeTab points to current workspace. Workspace list shown in sidebar with add/delete/rename. Dropdown selector in header also allows switching."
+  }
+}

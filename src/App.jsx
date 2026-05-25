@@ -74,6 +74,16 @@ const THEMES = {
   }
 };
 
+// --- Password Hashing Helper ---
+const hashPassword = async (password) => {
+  if (!password) return '';
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
 const defaultWorkspaces = [
   {
     id: 'ws-1', name: 'Product Launch Roadmap',
@@ -305,6 +315,7 @@ export default function WorkflowApp() {
   // --- Clone Panel States ---
   const [showClonePanel, setShowClonePanel] = useState(false);
   const [selectedCloneSourceId, setSelectedCloneSourceId] = useState(null);
+  const [cloneToTabMenu, setCloneToTabMenu] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -334,9 +345,21 @@ export default function WorkflowApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [showPasswordInput, setShowPasswordInput] = useState(false);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
   const [showGatePassword, setShowGatePassword] = useState(false);
+
+  // --- Hidden Project System ---
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState('');
+  const [showProjectPanel, setShowProjectPanel] = useState(false);
+  const [projectPanelMode, setProjectPanelMode] = useState('main'); // main, create, switch, delete, changePassword
+  const [projectNameInput, setProjectNameInput] = useState('');
+  const [projectPasswordInput, setProjectPasswordInput] = useState('');
+  const [projectPasswordConfirm, setProjectPasswordConfirm] = useState('');
+  const [projectError, setProjectError] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const logoTapRef = useRef({ count: 0, lastTap: 0 });
+  const saveTimerRef = useRef(null);
+  const projectsRef = useRef([]);
 
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
@@ -450,77 +473,222 @@ export default function WorkflowApp() {
 
   // --- Initialization & Auto-Save ---
   useEffect(() => {
-    try {
-      const savedWs = localStorage.getItem('premium-workspaces');
-      const savedTab = localStorage.getItem('premium-active-tab');
-      const savedCounter = localStorage.getItem('premium-counter');
+    const init = async () => {
+      try {
+        // Check for new project system first
+        const savedAppState = localStorage.getItem('nexus-app-state');
+        const savedActiveProject = localStorage.getItem('nexus-active-project');
 
-      let initialWorkspaces = defaultWorkspaces;
-      let initialTab = 'ws-1';
-      let initialNextId = 10;
+        if (savedAppState) {
+          // Load from new project system
+          const parsedProjects = JSON.parse(savedAppState);
+          if (parsedProjects && Array.isArray(parsedProjects) && parsedProjects.length > 0) {
+            // Migrate any unhashed passwords (short strings that are not 64-char hex)
+            let needsSave = false;
+            const migratedProjects = await Promise.all(parsedProjects.map(async (p) => {
+              if (p.password && !/^[a-f0-9]{64}$/.test(p.password)) {
+                needsSave = true;
+                return { ...p, password: await hashPassword(p.password) };
+              }
+              return p;
+            }));
+            if (needsSave) {
+              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
+            }
 
-      if (savedWs) {
-         const parsedWs = JSON.parse(savedWs);
-         if (parsedWs && Array.isArray(parsedWs)) {
-             initialWorkspaces = parsedWs.map(ws => {
-               const grps = ws.groups || [];
-               const nds = ws.nodes || [];
-               return {
-                 ...ws,
-                 groups: computeLayout(grps, nds),
-                 nodes: nds,
-                 edges: ws.edges || []
-               };
-             });
-         }
-      }
-      
-      if (savedTab) initialTab = savedTab;
-      else if (initialWorkspaces.length > 0) initialTab = initialWorkspaces[0].id;
-      
-      if (savedCounter) initialNextId = parseInt(savedCounter, 10) || 10;
+            setProjects(migratedProjects);
+            const activeId = savedActiveProject || migratedProjects[0].id;
+            setActiveProjectId(activeId);
+            const activeProj = migratedProjects.find(p => p.id === activeId) || migratedProjects[0];
+            
+            let initialWorkspaces = activeProj.workspaces || defaultWorkspaces;
+            initialWorkspaces = initialWorkspaces.map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            });
+            
+            setWorkspaces(initialWorkspaces);
+            setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
+            setNextId(activeProj.nextId || 10);
+            
+            // Default (first) project is always password-free
+            const isDefaultProject = activeProj.id === migratedProjects[0].id;
+            if (!isDefaultProject && activeProj.password) {
+              setPasswordEnabled(true);
+              setStoredPassword(activeProj.password);
+            }
+            // Strip password from default project in storage if present
+            if (migratedProjects[0].password) {
+              migratedProjects[0] = { ...migratedProjects[0], password: '' };
+              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
+            }
+          }
+        } else {
+          // Migration from old localStorage keys
+          const savedWs = localStorage.getItem('premium-workspaces');
+          const savedTab = localStorage.getItem('premium-active-tab');
+          const savedCounter = localStorage.getItem('premium-counter');
+          const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
+          const savedPassword = localStorage.getItem('nexus-password');
 
-      setWorkspaces(initialWorkspaces);
-      setActiveTab(initialTab);
-      setNextId(initialNextId);
+          let initialWorkspaces = defaultWorkspaces;
+          let initialTab = 'ws-1';
+          let initialNextId = 10;
 
-      // Initialize password protection state
-      const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
-      const savedPassword = localStorage.getItem('nexus-password');
-      if (savedPasswordEnabled === 'true' && savedPassword) {
-        setPasswordEnabled(true);
-        setStoredPassword(savedPassword);
-      }
-    } catch (e) {
+          if (savedWs) {
+            const parsedWs = JSON.parse(savedWs);
+            if (parsedWs && Array.isArray(parsedWs)) {
+              initialWorkspaces = parsedWs.map(ws => {
+                const grps = ws.groups || [];
+                const nds = ws.nodes || [];
+                return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+              });
+            }
+          }
+          
+          if (savedTab) initialTab = savedTab;
+          else if (initialWorkspaces.length > 0) initialTab = initialWorkspaces[0].id;
+          
+          if (savedCounter) initialNextId = parseInt(savedCounter, 10) || 10;
+
+          // Build default project from migrated data - default project is always password-free
+          const defaultProject = {
+            id: 'proj-default',
+            name: 'Default',
+            password: '',
+            workspaces: initialWorkspaces,
+            activeTab: initialTab,
+            nextId: initialNextId
+          };
+
+          setProjects([defaultProject]);
+          setActiveProjectId('proj-default');
+          setWorkspaces(initialWorkspaces);
+          setActiveTab(initialTab);
+          setNextId(initialNextId);
+
+          // Save to new format and clean up old keys
+          localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
+          localStorage.setItem('nexus-active-project', 'proj-default');
+          localStorage.removeItem('premium-workspaces');
+          localStorage.removeItem('premium-active-tab');
+          localStorage.removeItem('premium-counter');
+          localStorage.removeItem('nexus-password-enabled');
+          localStorage.removeItem('nexus-password');
+        }
+      } catch (e) {
+        const defaultProject = {
+          id: 'proj-default',
+          name: 'Default',
+          password: '',
+          workspaces: defaultWorkspaces,
+          activeTab: 'ws-1',
+          nextId: 10
+        };
+      setProjects([defaultProject]);
+      setActiveProjectId('proj-default');
       setWorkspaces(defaultWorkspaces);
       setActiveTab('ws-1');
       setNextId(10);
-    }
-    setInitialized(true);
+      }
+      setInitialized(true);
+    };
+    init();
   }, []);
 
   useEffect(() => {
     stateRef.current = { workspaces, activeTab, nextId };
   }, [workspaces, activeTab, nextId]);
 
+  // Keep projectsRef in sync with projects state for debounced localStorage writes
   useEffect(() => {
-    if (initialized) {
-      localStorage.setItem('premium-workspaces', JSON.stringify(workspaces));
-      localStorage.setItem('premium-active-tab', activeTab);
-      localStorage.setItem('premium-counter', nextId.toString());
-    }
-  }, [workspaces, activeTab, nextId, initialized]);
+    projectsRef.current = projects;
+  }, [projects]);
 
   useEffect(() => {
-    if (initialized) {
-      localStorage.setItem('nexus-password-enabled', passwordEnabled ? 'true' : 'false');
-      localStorage.setItem('nexus-password', storedPassword);
+    if (initialized && activeProjectId) {
+      setProjects(prev => {
+        const updated = prev.map(p => p.id === activeProjectId 
+          ? { ...p, workspaces, activeTab, nextId }
+          : p
+        );
+        return updated;
+      });
+      // Debounced localStorage write (outside state updater)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const currentProjects = projectsRef.current;
+        localStorage.setItem('nexus-app-state', JSON.stringify(currentProjects));
+      }, 500);
+      localStorage.setItem('nexus-active-project', activeProjectId);
     }
-  }, [passwordEnabled, storedPassword, initialized]);
+  }, [workspaces, activeTab, nextId, initialized, activeProjectId]);
+
+  useEffect(() => {
+    if (initialized && activeProjectId) {
+      setProjects(prev => {
+        const updated = prev.map(p => p.id === activeProjectId
+          ? { ...p, password: storedPassword }
+          : p
+        );
+        return updated;
+      });
+      // Debounced localStorage write (outside state updater)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const currentProjects = projectsRef.current;
+        localStorage.setItem('nexus-app-state', JSON.stringify(currentProjects));
+      }, 500);
+    }
+  }, [storedPassword, initialized, activeProjectId]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setFocusedNodeId(null);
   }, [activeTab]);
+
+  // --- Secret Keyboard Shortcuts (Ctrl+Shift+P toggle, Ctrl+Shift+/ boss key, Escape dismiss) ---
+  useEffect(() => {
+    const handleSecretKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        setShowProjectPanel(prev => {
+          if (prev) return false;
+          setProjectPanelMode('main');
+          setProjectError('');
+          setProjectNameInput('');
+          setProjectPasswordInput('');
+          setProjectPasswordConfirm('');
+          setSelectedProjectId(null);
+          return true;
+        });
+      }
+      // Ctrl+Shift+? (Ctrl+Shift+/) - boss key: instantly switch to default (first) project
+      if (e.ctrlKey && e.shiftKey && (e.key === '?' || e.key === '/')) {
+        e.preventDefault();
+        const currentProjects = projectsRef.current;
+        if (currentProjects.length > 0) {
+          const defaultProjectId = currentProjects[0].id;
+          // Only switch if not already on the default project
+          if (activeProjectId !== defaultProjectId) {
+            cycleToProject(defaultProjectId);
+          }
+        }
+      }
+      if (e.key === 'Escape' && showProjectPanel) {
+        setShowProjectPanel(false);
+      }
+    };
+    window.addEventListener('keydown', handleSecretKey);
+    return () => window.removeEventListener('keydown', handleSecretKey);
+  }, [showProjectPanel, activeProjectId]);
 
   // --- Auto-hide sidebar on small screens ---
   useEffect(() => {
@@ -930,6 +1098,224 @@ export default function WorkflowApp() {
     setEditingTab(null);
   };
 
+  // --- Project Management Functions ---
+  const openProjectPanel = () => {
+    setShowProjectPanel(true);
+    setProjectPanelMode('main');
+    setProjectError('');
+    setProjectNameInput('');
+    setProjectPasswordInput('');
+    setProjectPasswordConfirm('');
+    setSelectedProjectId(null);
+  };
+
+  const handleLogoTap = () => {
+    const now = Date.now();
+    const ref = logoTapRef.current;
+    if (now - ref.lastTap < 1000) {
+      ref.count += 1;
+    } else {
+      ref.count = 1;
+    }
+    ref.lastTap = now;
+    if (ref.count >= 3) {
+      ref.count = 0;
+      openProjectPanel();
+    }
+  };
+
+  const createProject = async () => {
+    if (!projectNameInput.trim() || !projectPasswordInput.trim()) {
+      setProjectError('Both fields required.');
+      return;
+    }
+    const wsId = `ws-${Date.now()}`;
+    const hashedPass = await hashPassword(projectPasswordInput.trim());
+    const newProj = {
+      id: `proj-${Date.now()}`,
+      name: projectNameInput.trim(),
+      password: hashedPass,
+      workspaces: [{ id: wsId, name: 'Workspace 1', nodes: [], edges: [], groups: [] }],
+      activeTab: wsId,
+      nextId: 10
+    };
+    setProjects(prev => {
+      const updated = [...prev, newProj];
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    setProjectError('');
+    setProjectPanelMode('main');
+    setProjectNameInput('');
+    setProjectPasswordInput('');
+  };
+
+  const switchProject = async (targetId) => {
+    const target = projects.find(p => p.id === targetId);
+    if (!target) return;
+    const hashedInput = await hashPassword(projectPasswordInput);
+    if (hashedInput !== target.password) {
+      setProjectError('Incorrect.');
+      return;
+    }
+    // Save current project state
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId
+        ? { ...p, workspaces, activeTab, nextId }
+        : p
+      );
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    // Load target project
+    let targetWorkspaces = target.workspaces || defaultWorkspaces;
+    targetWorkspaces = targetWorkspaces.map(ws => {
+      const grps = ws.groups || [];
+      const nds = ws.nodes || [];
+      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+    });
+    setActiveProjectId(targetId);
+    setWorkspaces(targetWorkspaces);
+    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
+    setNextId(target.nextId || 10);
+    setStoredPassword(target.password || '');
+    setPasswordEnabled(!!target.password);
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', targetId);
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+    setTransform({ x: 0, y: 0, scale: 1 });
+    // Reset history
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  };
+
+  // Passwordless project switch - used by boss key (Ctrl+Shift+/) and default project switch from panel
+  const cycleToProject = (targetId) => {
+    const target = projectsRef.current.find(p => p.id === targetId);
+    if (!target) return;
+    const { workspaces: currentWs, activeTab: currentTab, nextId: currentNextId } = stateRef.current;
+    // Save current project state
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId
+        ? { ...p, workspaces: currentWs, activeTab: currentTab, nextId: currentNextId }
+        : p
+      );
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    // Load target project
+    let targetWorkspaces = target.workspaces || defaultWorkspaces;
+    targetWorkspaces = targetWorkspaces.map(ws => {
+      const grps = ws.groups || [];
+      const nds = ws.nodes || [];
+      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+    });
+    const isDefault = projectsRef.current.indexOf(target) === 0;
+    setActiveProjectId(targetId);
+    setWorkspaces(targetWorkspaces);
+    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
+    setNextId(target.nextId || 10);
+    // Default project is always password-free
+    if (isDefault) {
+      setStoredPassword('');
+      setPasswordEnabled(false);
+    } else {
+      setStoredPassword(target.password || '');
+      setPasswordEnabled(!!target.password);
+    }
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', targetId);
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+    setTransform({ x: 0, y: 0, scale: 1 });
+    // Reset history
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  };
+
+  const deleteProject = async (targetId) => {
+    const target = projects.find(p => p.id === targetId);
+    if (!target) return;
+    if (projects.length <= 1) {
+      setProjectError('Cannot remove the only entry.');
+      return;
+    }
+    const hashedInput = await hashPassword(projectPasswordInput);
+    if (hashedInput !== target.password) {
+      setProjectError('Incorrect.');
+      return;
+    }
+    const updated = projects.filter(p => p.id !== targetId);
+    setProjects(updated);
+    localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+    // If deleting active project, switch to first available
+    if (targetId === activeProjectId) {
+      const next = updated[0];
+      setActiveProjectId(next.id);
+      let nextWorkspaces = next.workspaces || defaultWorkspaces;
+      nextWorkspaces = nextWorkspaces.map(ws => {
+        const grps = ws.groups || [];
+        const nds = ws.nodes || [];
+        return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+      });
+      setWorkspaces(nextWorkspaces);
+      setActiveTab(next.activeTab || (nextWorkspaces.length > 0 ? nextWorkspaces[0].id : ''));
+      setNextId(next.nextId || 10);
+      setStoredPassword(next.password || '');
+      setPasswordEnabled(!!next.password);
+      setIsAuthenticated(false);
+      localStorage.setItem('nexus-active-project', next.id);
+    }
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+  };
+
+  const changeProjectPassword = async () => {
+    const current = projects.find(p => p.id === activeProjectId);
+    if (!current) return;
+    // Default project (first) cannot have a password
+    if (projects.indexOf(current) === 0) {
+      setProjectError('Cannot set key on default.');
+      return;
+    }
+    // Skip current password check if project has no password set
+    if (current.password) {
+      if (!projectPasswordInput.trim()) {
+        setProjectError('Current password required.');
+        return;
+      }
+      const hashedInput = await hashPassword(projectPasswordInput);
+      if (hashedInput !== current.password) {
+        setProjectError('Incorrect current password.');
+        return;
+      }
+    }
+    if (!projectPasswordConfirm.trim()) {
+      setProjectError('New password required.');
+      return;
+    }
+    const newPass = await hashPassword(projectPasswordConfirm.trim());
+    setStoredPassword(newPass);
+    setPasswordEnabled(!!newPass);
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId ? { ...p, password: newPass } : p);
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectPasswordConfirm('');
+    setProjectError('');
+  };
+
   // --- Import / Export ---
   const exportData = () => {
     const data = { workspaces, activeTab, nextId };
@@ -1088,6 +1474,7 @@ export default function WorkflowApp() {
     setContextMenu(null);
     setNodeContextMenu(null);
     setGroupContextMenu(null);
+    setCloneToTabMenu(null);
     setFocusedNodeId(null);
     setFocusedGroupId(null);
 
@@ -1405,6 +1792,43 @@ export default function WorkflowApp() {
     setNextId(prev => prev + 1);
   };
 
+  const cloneNodeToWorkspace = (nodeId, targetWorkspaceId) => {
+    takeSnapshot();
+    const target = nodes.find(n => n.id === nodeId);
+    if (!target) return;
+
+    const sourceId = target.cloneSourceId || target.id;
+
+    // Compute an offset position to avoid stacking clones
+    const targetWs = workspaces.find(ws => ws.id === targetWorkspaceId);
+    const targetNodes = targetWs ? targetWs.nodes : [];
+    const existingClonesCount = targetNodes.filter(n => n.cloneSourceId === sourceId).length;
+    const cloneX = 200 + 60 * existingClonesCount;
+    const cloneY = 200 + 60 * existingClonesCount;
+
+    const clone = {
+      id: nextId.toString(),
+      x: cloneX,
+      y: cloneY,
+      title: target.title,
+      content: target.content,
+      expanded: true,
+      theme: target.theme,
+      groupId: null,
+      status: target.status || 'Todo',
+      priority: target.priority || 'Medium',
+      nodeType: target.nodeType || 'task',
+      cloneSourceId: sourceId
+    };
+
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws.id !== targetWorkspaceId) return ws;
+      const updatedNodes = [...ws.nodes, clone];
+      return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
+    }));
+    setNextId(prev => prev + 1);
+  };
+
   const disconnectNodeLinks = (nodeId) => {
     takeSnapshot();
     updateActiveWorkspace(ws => ({
@@ -1432,44 +1856,50 @@ export default function WorkflowApp() {
     });
   };
 
-  const updateNode = (id, updates) => updateActiveWorkspace(ws => {
-    let updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
-    
-    // Clone propagation: if title or content changed, sync to all clones
-    if (updates.title !== undefined || updates.content !== undefined) {
-      const editedNode = updatedNodes.find(n => n.id === id);
-      if (editedNode) {
-        const syncFields = {};
-        if (updates.title !== undefined) syncFields.title = updates.title;
-        if (updates.content !== undefined) syncFields.content = updates.content;
-        
-        if (editedNode.cloneSourceId) {
-          // Edited node is a clone: update all nodes with same cloneSourceId AND the source itself
-          updatedNodes = updatedNodes.map(n => {
-            if (n.id === id) return n; // already updated
-            if (n.id === editedNode.cloneSourceId || n.cloneSourceId === editedNode.cloneSourceId) {
-              return { ...n, ...syncFields };
-            }
-            return n;
-          });
-        } else {
-          // Edited node is a source: update all nodes whose cloneSourceId matches this id
-          updatedNodes = updatedNodes.map(n => {
-            if (n.id === id) return n; // already updated
-            if (n.cloneSourceId === id) {
-              return { ...n, ...syncFields };
-            }
-            return n;
-          });
+  const updateNode = (id, updates) => {
+    // Single atomic state update that handles both the direct node edit
+    // and cross-workspace clone propagation in one pass
+    const syncFields = {};
+    if (updates.title !== undefined) syncFields.title = updates.title;
+    if (updates.content !== undefined) syncFields.content = updates.content;
+    const shouldPropagate = Object.keys(syncFields).length > 0;
+
+    setWorkspaces(prev => {
+      // Find the source id for clone propagation
+      let sourceId = null;
+      if (shouldPropagate) {
+        for (const ws of prev) {
+          const found = ws.nodes.find(n => n.id === id);
+          if (found) {
+            sourceId = found.cloneSourceId || found.id;
+            break;
+          }
         }
       }
-    }
-    
-    return {
-      nodes: updatedNodes,
-      groups: computeLayout(ws.groups, updatedNodes)
-    };
-  });
+
+      return prev.map(ws => {
+        const isActiveWs = ws.id === activeTab;
+        const hasEditedNode = ws.nodes.some(n => n.id === id);
+        const hasRelatedClone = shouldPropagate && sourceId && ws.nodes.some(n =>
+          n.id === sourceId || n.cloneSourceId === sourceId
+        );
+
+        if (!isActiveWs && !hasEditedNode && !hasRelatedClone) return ws;
+
+        const updatedNodes = ws.nodes.map(n => {
+          // Apply direct update to the edited node
+          if (n.id === id) return { ...n, ...updates };
+          // Propagate title/content to related clones
+          if (shouldPropagate && sourceId && (n.id === sourceId || n.cloneSourceId === sourceId)) {
+            return { ...n, ...syncFields };
+          }
+          return n;
+        });
+
+        return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
+      });
+    });
+  };
 
   const processImage = (file, nodeId, compress) => {
     if (!compress) {
@@ -2030,6 +2460,247 @@ export default function WorkflowApp() {
     </div>
   );
 
+  const renderProjectPanel = (isGate = false) => {
+    const zBg = isGate ? 'z-[10000]' : 'z-[9998]';
+    const zContent = isGate ? 'z-[10001]' : 'z-[9999]';
+    return (
+      <>
+        <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm`} onClick={() => setShowProjectPanel(false)} />
+        <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto" onKeyDown={(e) => { if (e.key === 'Escape') setShowProjectPanel(false); }}>
+            
+            {projectPanelMode === 'main' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center mb-2">
+                  <Lock className="w-5 h-5 text-slate-400" />
+                </div>
+                {!isGate && (
+                  <button onClick={() => { setProjectPanelMode('create'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                    New
+                  </button>
+                )}
+                {projects.length > 1 && (
+                  <button onClick={() => { setProjectPanelMode('switch'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                    Switch
+                  </button>
+                )}
+                {!isGate && projects.length > 1 && (
+                  <button onClick={() => { setProjectPanelMode('delete'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors">
+                    Remove
+                  </button>
+                )}
+                {!isGate && projects.indexOf(projects.find(p => p.id === activeProjectId)) !== 0 && (
+                  <button onClick={() => { setProjectPanelMode('changePassword'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                    Change Key
+                  </button>
+                )}
+                <button onClick={() => setShowProjectPanel(false)} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {!isGate && projectPanelMode === 'create' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center mb-2">
+                  <Lock className="w-5 h-5 text-slate-400" />
+                </div>
+                <input
+                  type="text"
+                  value={projectNameInput}
+                  onChange={(e) => setProjectNameInput(e.target.value)}
+                  placeholder="Name"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  autoFocus
+                />
+                <input
+                  type="password"
+                  value={projectPasswordInput}
+                  onChange={(e) => setProjectPasswordInput(e.target.value)}
+                  placeholder="Key"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+                {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                <button onClick={createProject} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                  Confirm
+                </button>
+                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                  Back
+                </button>
+              </div>
+            )}
+
+            {projectPanelMode === 'switch' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center mb-2">
+                  <Lock className="w-5 h-5 text-slate-400" />
+                </div>
+                {isGate ? (
+                  <>
+                    {!selectedProjectId ? (
+                      <div className="space-y-2">
+                        {projects.filter(p => p.id !== activeProjectId).map(p => {
+                          const isDefault = projects.indexOf(p) === 0;
+                          return (
+                            <button key={p.id} onClick={() => {
+                              if (isDefault) {
+                                cycleToProject(p.id);
+                              } else {
+                                setSelectedProjectId(p.id);
+                                setProjectPasswordInput('');
+                                setProjectError('');
+                              }
+                            }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left flex items-center justify-between">
+                              <span>{p.name}</span>
+                              {isDefault && <span className="text-[10px] text-slate-400 ml-2">*</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <input
+                          type="password"
+                          value={projectPasswordInput}
+                          onChange={(e) => setProjectPasswordInput(e.target.value)}
+                          placeholder="Enter key"
+                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
+                        />
+                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                          Confirm
+                        </button>
+                        <button onClick={() => { setSelectedProjectId(null); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                          Back
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    {!selectedProjectId ? (
+                      projects.filter(p => p.id !== activeProjectId).map((p, _, arr) => {
+                        const isDefault = projects.indexOf(p) === 0;
+                        return (
+                          <button key={p.id} onClick={() => {
+                            if (isDefault) {
+                              cycleToProject(p.id);
+                            } else {
+                              setSelectedProjectId(p.id);
+                              setProjectPasswordInput('');
+                              setProjectError('');
+                            }
+                          }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left flex items-center justify-between">
+                            <span>{p.name}</span>
+                            {isDefault && <span className="text-[10px] text-slate-400 ml-2">*</span>}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="space-y-3">
+                        <input
+                          type="password"
+                          value={projectPasswordInput}
+                          onChange={(e) => setProjectPasswordInput(e.target.value)}
+                          placeholder="Enter key"
+                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
+                        />
+                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                          Confirm
+                        </button>
+                        <button onClick={() => { setSelectedProjectId(null); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                          Back
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                  Back
+                </button>
+              </div>
+            )}
+
+            {!isGate && projectPanelMode === 'delete' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center mb-2">
+                  <Lock className="w-5 h-5 text-red-400" />
+                </div>
+                {!selectedProjectId ? (
+                  <div className="space-y-2">
+                    {projects.filter(p => (p.id !== activeProjectId || projects.length > 1) && projects.indexOf(p) !== 0).map(p => (
+                      <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors text-left">
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-500 text-center">Confirm removal</p>
+                    <input
+                      type="password"
+                      value={projectPasswordInput}
+                      onChange={(e) => setProjectPasswordInput(e.target.value)}
+                      placeholder="Enter key to confirm"
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === 'Enter') deleteProject(selectedProjectId); }}
+                    />
+                    {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                    <button onClick={() => deleteProject(selectedProjectId)} className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                      Remove
+                    </button>
+                  </div>
+                )}
+                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                  Back
+                </button>
+              </div>
+            )}
+
+            {!isGate && projectPanelMode === 'changePassword' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center mb-2">
+                  <Lock className="w-5 h-5 text-slate-400" />
+                </div>
+                {(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })() && (
+                  <input
+                    type="password"
+                    value={projectPasswordInput}
+                    onChange={(e) => setProjectPasswordInput(e.target.value)}
+                    placeholder="Current key"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    autoFocus
+                  />
+                )}
+                <input
+                  type="password"
+                  value={projectPasswordConfirm}
+                  onChange={(e) => setProjectPasswordConfirm(e.target.value)}
+                  placeholder="New key"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  autoFocus={!(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })()}
+                />
+                {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                <button onClick={changeProjectPassword} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                  Update
+                </button>
+                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                  Back
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  };
+
   if (passwordEnabled && !isAuthenticated) {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
@@ -2041,9 +2712,10 @@ export default function WorkflowApp() {
             <h2 className="text-lg font-bold text-slate-800">Password Required</h2>
             <p className="text-sm text-slate-500 mt-1">Enter your password to access the app</p>
           </div>
-          <form onSubmit={(e) => {
+          <form onSubmit={async (e) => {
             e.preventDefault();
-            if (passwordInput === storedPassword) {
+            const hashedInput = await hashPassword(passwordInput);
+            if (hashedInput === storedPassword) {
               setIsAuthenticated(true);
               setPasswordInput('');
               setPasswordError('');
@@ -2079,6 +2751,7 @@ export default function WorkflowApp() {
             </button>
           </form>
         </div>
+        {showProjectPanel && renderProjectPanel(true)}
       </div>
     );
   }
@@ -2097,7 +2770,7 @@ export default function WorkflowApp() {
             {showSidebar ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeft className="w-5 h-5" />}
           </button>
           
-          <div className="p-2 sm:p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-lg sm:rounded-xl text-white shadow-md shadow-indigo-100 shrink-0">
+          <div className="p-2 sm:p-2.5 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-lg sm:rounded-xl text-white shadow-md shadow-indigo-100 shrink-0 cursor-pointer select-none" onClick={handleLogoTap}>
             <Network className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
 
@@ -2316,67 +2989,6 @@ export default function WorkflowApp() {
                     <div className="text-slate-400 font-medium">Total Tasks</div>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* --- Password Protection Section --- */}
-            <div className="p-4 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-400 tracking-wider uppercase block mb-3">Password Protection</span>
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-indigo-500" />
-                    <span className="text-xs font-semibold text-slate-700">Enable Protection</span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (passwordEnabled) {
-                        setPasswordEnabled(false);
-                        setIsAuthenticated(false);
-                      } else {
-                        if (storedPassword) {
-                          setPasswordEnabled(true);
-                        } else {
-                          setShowPasswordInput(true);
-                        }
-                      }
-                    }}
-                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${passwordEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${passwordEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-                {(showPasswordInput || (passwordEnabled && storedPassword)) && (
-                  <div className="space-y-2 pt-2 border-t border-slate-200">
-                    <label className="text-xs font-medium text-slate-500">
-                      {storedPassword ? 'Change Password' : 'Set Password'}
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={newPasswordInput}
-                        onChange={(e) => setNewPasswordInput(e.target.value)}
-                        placeholder={storedPassword ? 'New password' : 'Enter password'}
-                        className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                      <button
-                        onClick={() => {
-                          if (newPasswordInput.trim()) {
-                            setStoredPassword(newPasswordInput.trim());
-                            setNewPasswordInput('');
-                            if (!passwordEnabled) {
-                              setPasswordEnabled(true);
-                            }
-                            setShowPasswordInput(false);
-                          }
-                        }}
-                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -3008,6 +3620,27 @@ export default function WorkflowApp() {
               <button className="w-full text-left px-4 py-2 hover:bg-violet-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cloneNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <GitBranch className="w-3.5 h-3.5 mr-2 text-violet-500" /> Clone Node
               </button>
+              <div className="relative">
+                <button className="w-full text-left px-4 py-2 hover:bg-violet-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { setCloneToTabMenu(cloneToTabMenu ? null : nodeContextMenu.nodeId); }}>
+                  <GitBranch className="w-3.5 h-3.5 mr-2 text-violet-400" /> Clone to Tab...
+                </button>
+                {cloneToTabMenu === nodeContextMenu.nodeId && (
+                  <div className="ml-4 mb-1 bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
+                    {workspaces.filter(ws => ws.id !== activeTab).map(ws => (
+                      <button
+                        key={ws.id}
+                        className="w-full text-left px-4 py-1.5 hover:bg-violet-50 text-[11px] font-medium text-slate-600 flex items-center"
+                        onClick={() => { cloneNodeToWorkspace(nodeContextMenu.nodeId, ws.id); setCloneToTabMenu(null); setNodeContextMenu(null); }}
+                      >
+                        <ExternalLink className="w-3 h-3 mr-1.5 text-violet-400" /> {ws.name}
+                      </button>
+                    ))}
+                    {workspaces.filter(ws => ws.id !== activeTab).length === 0 && (
+                      <span className="block px-4 py-1.5 text-[11px] text-slate-400">No other tabs</span>
+                    )}
+                  </div>
+                )}
+              </div>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { duplicateNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Duplicate Card
               </button>
@@ -3052,15 +3685,36 @@ export default function WorkflowApp() {
 
         {/* --- Clone Panels (Three-Panel Split View) --- */}
         {showClonePanel && viewMode === 'canvas' && (() => {
-          // Find all source nodes that have clones
-          const sourceNodes = nodes.filter(n => {
-            return nodes.some(other => other.cloneSourceId === n.id);
+          // Find all source nodes that have clones across ALL workspaces
+          const allCloneSourceIds = new Set();
+          workspaces.forEach(ws => {
+            ws.nodes.forEach(n => {
+              if (n.cloneSourceId) allCloneSourceIds.add(n.cloneSourceId);
+            });
           });
 
-          // Get instances for the selected source
-          const cloneInstances = selectedCloneSourceId ? nodes.filter(n => 
-            n.id === selectedCloneSourceId || n.cloneSourceId === selectedCloneSourceId
-          ) : [];
+          const sourceNodes = [];
+          const seenSourceIds = new Set();
+          workspaces.forEach(ws => {
+            ws.nodes.forEach(n => {
+              if (allCloneSourceIds.has(n.id) && !seenSourceIds.has(n.id)) {
+                seenSourceIds.add(n.id);
+                sourceNodes.push({ ...n, _workspaceId: ws.id, _workspaceName: ws.name });
+              }
+            });
+          });
+
+          // Get instances for the selected source from ALL workspaces
+          const cloneInstances = [];
+          if (selectedCloneSourceId) {
+            workspaces.forEach(ws => {
+              ws.nodes.forEach(n => {
+                if (n.id === selectedCloneSourceId || n.cloneSourceId === selectedCloneSourceId) {
+                  cloneInstances.push({ ...n, _workspaceId: ws.id, _workspaceName: ws.name, _edges: ws.edges });
+                }
+              });
+            });
+          }
 
           return (
             <>
@@ -3079,6 +3733,7 @@ export default function WorkflowApp() {
                     sourceNodes.map(srcNode => {
                       const srcTheme = THEMES[srcNode.theme] || THEMES.amber;
                       const isSelected = selectedCloneSourceId === srcNode.id;
+                      const totalClones = workspaces.reduce((count, ws) => count + ws.nodes.filter(n => n.cloneSourceId === srcNode.id).length, 0);
                       return (
                         <div
                           key={srcNode.id}
@@ -3087,7 +3742,7 @@ export default function WorkflowApp() {
                           style={{ borderLeftColor: srcTheme.line, backgroundColor: isSelected ? undefined : `${srcTheme.line}10` }}
                         >
                           <span className="text-xs font-semibold text-slate-200 truncate block">{srcNode.title || `Node #${srcNode.id}`}</span>
-                          <span className="text-[10px] text-slate-400 mt-0.5 block">{nodes.filter(n => n.cloneSourceId === srcNode.id).length} clone(s)</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block">{totalClones} clone(s) &middot; {srcNode._workspaceName}</span>
                         </div>
                       );
                     })
@@ -3105,42 +3760,92 @@ export default function WorkflowApp() {
                     <p className="text-xs text-slate-400 text-center mt-4">Click a clone node to see its locations</p>
                   ) : (
                     cloneInstances.map(instance => {
-                      // Find prev/next based on edges
-                      const prevEdge = edges.find(e => e.target === instance.id);
-                      const nextEdge = edges.find(e => e.source === instance.id);
-                      const prevNode = prevEdge ? nodes.find(n => n.id === prevEdge.source) : null;
-                      const nextNode = nextEdge ? nodes.find(n => n.id === nextEdge.target) : null;
+                      // Find ALL prev and next edges for this instance
+                      const instanceEdges = instance._edges || [];
+                      const prevEdges = instanceEdges.filter(e => e.target === instance.id);
+                      const nextEdges = instanceEdges.filter(e => e.source === instance.id);
+                      
+                      // Find the workspace this instance belongs to
+                      const instanceWs = workspaces.find(ws => ws.id === instance._workspaceId);
+                      const wsNodes = instanceWs ? instanceWs.nodes : [];
+                      const wsGroups = instanceWs ? instanceWs.groups : [];
+
+                      const prevNodes = prevEdges.map(e => wsNodes.find(n => n.id === e.source)).filter(Boolean);
+                      const nextNodes = nextEdges.map(e => wsNodes.find(n => n.id === e.target)).filter(Boolean);
+
+                      const isOtherWorkspace = instance._workspaceId !== activeTab;
 
                       return (
                         <div
-                          key={instance.id}
+                          key={`${instance._workspaceId}-${instance.id}`}
                           onClick={() => {
-                            // Navigate to node on canvas
-                            if (workspaceRef.current) {
-                              const rect = workspaceRef.current.getBoundingClientRect();
-                              const centerX = rect.width / 2;
-                              const centerY = rect.height / 2;
-                              setTransform(prev => ({
-                                ...prev,
-                                x: centerX - instance.x * prev.scale - 170 * prev.scale,
-                                y: centerY - instance.y * prev.scale - 80 * prev.scale
-                              }));
+                            if (isOtherWorkspace) {
+                              // Navigate to other workspace and focus node
+                              setActiveTab(instance._workspaceId);
+                              setTimeout(() => {
+                                if (workspaceRef.current) {
+                                  const rect = workspaceRef.current.getBoundingClientRect();
+                                  const centerX = rect.width / 2;
+                                  const centerY = rect.height / 2;
+                                  setTransform(prev => ({
+                                    ...prev,
+                                    x: centerX - instance.x * prev.scale - 170 * prev.scale,
+                                    y: centerY - instance.y * prev.scale - 80 * prev.scale
+                                  }));
+                                }
+                                setFocusedNodeId(instance.id);
+                                setTimeout(() => setFocusedNodeId(null), 3000);
+                              }, 100);
+                            } else {
+                              // Navigate within same workspace
+                              if (workspaceRef.current) {
+                                const rect = workspaceRef.current.getBoundingClientRect();
+                                const centerX = rect.width / 2;
+                                const centerY = rect.height / 2;
+                                setTransform(prev => ({
+                                  ...prev,
+                                  x: centerX - instance.x * prev.scale - 170 * prev.scale,
+                                  y: centerY - instance.y * prev.scale - 80 * prev.scale
+                                }));
+                              }
+                              setFocusedNodeId(instance.id);
+                              setTimeout(() => setFocusedNodeId(null), 3000);
                             }
-                            setFocusedNodeId(instance.id);
-                            setTimeout(() => setFocusedNodeId(null), 3000);
                           }}
                           className="px-3 py-2.5 rounded-lg cursor-pointer bg-slate-800/40 hover:bg-slate-700/40 transition-all border border-slate-700/30 hover:border-slate-600/50"
                         >
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <span className="text-slate-400 truncate max-w-[80px]">{prevNode ? prevNode.title || `Node #${prevNode.id}` : '(start)'}</span>
-                            <span className="text-slate-500">→</span>
-                            <span className="text-slate-200 font-bold truncate max-w-[100px]">{instance.title || `Node #${instance.id}`}</span>
-                            <span className="text-slate-500">→</span>
-                            <span className="text-slate-400 truncate max-w-[80px]">{nextNode ? nextNode.title || `Node #${nextNode.id}` : '(end)'}</span>
+                          <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
+                            <span className="text-slate-200 font-bold truncate max-w-[140px]">{instance.title || `Node #${instance.id}`}</span>
+                            <span className="text-[9px] text-slate-500 ml-auto">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
+                          </div>
+                          <div className="mt-1.5 flex flex-col gap-0.5">
+                            {prevNodes.length > 0 ? prevNodes.map((pn, idx) => (
+                              <div key={`prev-${prevEdges[idx].source}-${prevEdges[idx].target}-${idx}`} className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">from</span>
+                                <span className="text-slate-400 truncate max-w-[120px]">{pn.title || `Node #${pn.id}`}</span>
+                              </div>
+                            )) : (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">from</span>
+                                <span className="text-slate-500 italic">(start)</span>
+                              </div>
+                            )}
+                            {nextNodes.length > 0 ? nextNodes.map((nn, idx) => (
+                              <div key={`next-${nextEdges[idx].source}-${nextEdges[idx].target}-${idx}`} className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">to</span>
+                                <span className="text-slate-400 truncate max-w-[120px]">{nn.title || `Node #${nn.id}`}</span>
+                              </div>
+                            )) : (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">to</span>
+                                <span className="text-slate-500 italic">(end)</span>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            <span className="text-[9px] text-slate-500">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
-                            {instance.groupId && <span className="text-[9px] text-slate-500">in {groups.find(g => g.id === instance.groupId)?.name || 'group'}</span>}
+                            {isOtherWorkspace && <span className="text-[9px] text-violet-400 font-medium">Tab: {instance._workspaceName}</span>}
+                            {!isOtherWorkspace && <span className="text-[9px] text-slate-500">{instance._workspaceName}</span>}
+                            {instance.groupId && <span className="text-[9px] text-slate-500">in {wsGroups.find(g => g.id === instance.groupId)?.name || 'group'}</span>}
                           </div>
                         </div>
                       );
@@ -3307,6 +4012,9 @@ export default function WorkflowApp() {
           </div>
         );
       })()}
+
+      {/* --- Secret Project Panel --- */}
+      {showProjectPanel && renderProjectPanel(false)}
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes dash { to { stroke-dashoffset: -14; } }
