@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "fix",
+  "description": "Fix clone location panel to show ALL connections (not just the first), and implement cross-workspace clone system with 'Clone to Another Tab' UI option",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Fix Location Panel Edge Display Bug: In src/App.jsx around line 3110, the Clone Locations panel uses `edges.find(e => e.target === instance.id)` and `edges.find(e => e.source === instance.id)` which only returns the FIRST matching edge. Replace with `edges.filter(...)` to get ALL incoming and outgoing edges. Then update the rendering below to show all connections (multiple prev nodes and multiple next nodes) for each clone instance. Show them as a list of connections rather than a single prev->clone->next line.",
+    "Step 2 - Make Clone Panel Work Across All Workspaces: Currently `sourceNodes` and `cloneInstances` in the clone panel (line ~3055) only search the active workspace's `nodes`. Change this to search ALL workspaces. Replace `const sourceNodes = nodes.filter(...)` with a version that iterates over `workspaces` array to find all source nodes that have clones in ANY workspace. Similarly, `cloneInstances` should gather instances from ALL workspaces. For each instance in the location panel, show which workspace it belongs to (workspace name label).",
+    "Step 3 - Cross-Workspace Clone Sync: In `updateNode` function (line ~1434), the clone propagation logic uses `updateActiveWorkspace` which only syncs clones within the active workspace. Extend this to sync title/content changes to clones in ALL workspaces. When a clone's title or content is edited, use `setWorkspaces(prev => prev.map(ws => ({...ws, nodes: ws.nodes.map(n => ...)})))` to propagate changes across all workspaces.",
+    "Step 4 - Add 'Clone to Another Tab' Context Menu Option: Add a new option in the node context menu (after the existing 'Clone Node' button, around line 3008) called 'Clone to Tab...'. When clicked, show a small dropdown/modal listing all OTHER workspaces (not the current one). When the user picks a target workspace, create the clone node in that target workspace (at position x:200, y:200 since we can't know the exact viewport of the other workspace) with the same cloneSourceId logic.",
+    "Step 5 - Navigate to Clone in Another Workspace: When the user clicks a clone instance in the locations panel that belongs to a DIFFERENT workspace, automatically switch to that workspace (setActiveTab) and center the view on that clone node (using the existing focus/navigate pattern).",
+    "Step 6 - Verify Build: Run `npm run build` to confirm no compilation errors with all changes."
+  ],
+  "acceptance_criteria": [
+    "When a clone node has multiple incoming edges (multiple nodes pointing to it), ALL of them appear in the Clone Locations panel",
+    "When a clone node has multiple outgoing edges, ALL of them appear in the Clone Locations panel",
+    "The Clone Panel shows clone sources from ALL workspaces, not just the active one",
+    "Editing a clone node's title/content in one workspace propagates changes to its clones in other workspaces",
+    "Right-clicking a node shows 'Clone to Tab...' option that lists available target workspaces",
+    "Selecting a target workspace creates a clone in that workspace with proper cloneSourceId linkage",
+    "Clicking a clone location that is in another workspace navigates to that workspace and focuses the node",
+    "npm run build succeeds with no errors"
+  ],
+  "verification": ["npm run build"],
+  "blocked_reason": null,
+  "findings": ""
+}

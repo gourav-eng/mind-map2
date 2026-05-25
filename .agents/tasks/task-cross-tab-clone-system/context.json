@@ -1,0 +1,16 @@
+{
+  "project_type": "React SPA mind map application with single-file architecture",
+  "language": "JavaScript (JSX)",
+  "build_system": "Vite with React plugin",
+  "test_framework": "None - no test infrastructure exists",
+  "build_command": "npm run build",
+  "test_command": "npm run build (build verification only, no tests)",
+  "verification_instructions": "Run npm run build to ensure no compilation errors. Manual visual testing required for UI changes.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "npm install && npm run build",
+  "environment_constraints": "OPEN_INTERNET - full network access available",
+  "contribution_requirements": "All code is in src/App.jsx (single file architecture). Follow existing patterns for state management, use lucide-react icons, tailwind classes for styling.",
+  "key_patterns": "- All state lives in `workspaces` array, each workspace has {id, name, nodes, edges, groups}\n- Active workspace derived: `const activeWs = workspaces.find(w => w.id === activeTab)`\n- `nodes`, `edges`, `groups` are shortcuts to `activeWs.nodes/edges/groups`\n- Clone nodes have `cloneSourceId` pointing to the original source node id\n- Clone sync only propagates title/content changes within updateActiveWorkspace\n- updateActiveWorkspace uses setWorkspaces with map over only matching ws.id === activeTab\n- UI uses dark theme sidebar panels (bg-[#16213e], bg-[#0f3460])\n- Context menus are positioned absolute, triggered by right-click\n- Clone panel is a three-panel split view: list of sources, then locations for selected source",
+  "relevant_files": ["src/App.jsx"],
+  "directory_structure": "Single source file project:\n- src/App.jsx - entire application (~3200 lines)\n- src/main.jsx - React entry point\n- src/index.css - Tailwind imports\n- package.json - dependencies (React, lucide-react, Vite, Tailwind)"
+}

@@ -305,6 +305,7 @@ export default function WorkflowApp() {
   // --- Clone Panel States ---
   const [showClonePanel, setShowClonePanel] = useState(false);
   const [selectedCloneSourceId, setSelectedCloneSourceId] = useState(null);
+  const [cloneToTabMenu, setCloneToTabMenu] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -1088,6 +1089,7 @@ export default function WorkflowApp() {
     setContextMenu(null);
     setNodeContextMenu(null);
     setGroupContextMenu(null);
+    setCloneToTabMenu(null);
     setFocusedNodeId(null);
     setFocusedGroupId(null);
 
@@ -1405,6 +1407,36 @@ export default function WorkflowApp() {
     setNextId(prev => prev + 1);
   };
 
+  const cloneNodeToWorkspace = (nodeId, targetWorkspaceId) => {
+    takeSnapshot();
+    const target = nodes.find(n => n.id === nodeId);
+    if (!target) return;
+
+    const sourceId = target.cloneSourceId || target.id;
+
+    const clone = {
+      id: nextId.toString(),
+      x: 200,
+      y: 200,
+      title: target.title,
+      content: target.content,
+      expanded: true,
+      theme: target.theme,
+      groupId: null,
+      status: target.status || 'Todo',
+      priority: target.priority || 'Medium',
+      nodeType: target.nodeType || 'task',
+      cloneSourceId: sourceId
+    };
+
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws.id !== targetWorkspaceId) return ws;
+      const updatedNodes = [...ws.nodes, clone];
+      return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
+    }));
+    setNextId(prev => prev + 1);
+  };
+
   const disconnectNodeLinks = (nodeId) => {
     takeSnapshot();
     updateActiveWorkspace(ws => ({
@@ -1432,44 +1464,51 @@ export default function WorkflowApp() {
     });
   };
 
-  const updateNode = (id, updates) => updateActiveWorkspace(ws => {
-    let updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
-    
-    // Clone propagation: if title or content changed, sync to all clones
+  const updateNode = (id, updates) => {
+    // First update the active workspace
+    updateActiveWorkspace(ws => {
+      let updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
+      return {
+        nodes: updatedNodes,
+        groups: computeLayout(ws.groups, updatedNodes)
+      };
+    });
+
+    // Clone propagation across ALL workspaces: if title or content changed, sync to all clones
     if (updates.title !== undefined || updates.content !== undefined) {
-      const editedNode = updatedNodes.find(n => n.id === id);
-      if (editedNode) {
-        const syncFields = {};
-        if (updates.title !== undefined) syncFields.title = updates.title;
-        if (updates.content !== undefined) syncFields.content = updates.content;
-        
-        if (editedNode.cloneSourceId) {
-          // Edited node is a clone: update all nodes with same cloneSourceId AND the source itself
-          updatedNodes = updatedNodes.map(n => {
-            if (n.id === id) return n; // already updated
-            if (n.id === editedNode.cloneSourceId || n.cloneSourceId === editedNode.cloneSourceId) {
-              return { ...n, ...syncFields };
-            }
-            return n;
-          });
-        } else {
-          // Edited node is a source: update all nodes whose cloneSourceId matches this id
-          updatedNodes = updatedNodes.map(n => {
-            if (n.id === id) return n; // already updated
-            if (n.cloneSourceId === id) {
-              return { ...n, ...syncFields };
-            }
-            return n;
-          });
+      const syncFields = {};
+      if (updates.title !== undefined) syncFields.title = updates.title;
+      if (updates.content !== undefined) syncFields.content = updates.content;
+
+      setWorkspaces(prev => {
+        // Find the edited node across all workspaces
+        let editedNode = null;
+        for (const ws of prev) {
+          const found = ws.nodes.find(n => n.id === id);
+          if (found) { editedNode = { ...found, ...updates }; break; }
         }
-      }
+        if (!editedNode) return prev;
+
+        const sourceId = editedNode.cloneSourceId || editedNode.id;
+
+        return prev.map(ws => {
+          const hasRelated = ws.nodes.some(n => 
+            n.id === sourceId || n.cloneSourceId === sourceId
+          );
+          if (!hasRelated) return ws;
+
+          const updatedNodes = ws.nodes.map(n => {
+            if (n.id === id) return { ...n, ...updates }; // already updated
+            if (n.id === sourceId || n.cloneSourceId === sourceId) {
+              return { ...n, ...syncFields };
+            }
+            return n;
+          });
+          return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
+        });
+      });
     }
-    
-    return {
-      nodes: updatedNodes,
-      groups: computeLayout(ws.groups, updatedNodes)
-    };
-  });
+  };
 
   const processImage = (file, nodeId, compress) => {
     if (!compress) {
@@ -3008,6 +3047,27 @@ export default function WorkflowApp() {
               <button className="w-full text-left px-4 py-2 hover:bg-violet-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cloneNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <GitBranch className="w-3.5 h-3.5 mr-2 text-violet-500" /> Clone Node
               </button>
+              <div className="relative">
+                <button className="w-full text-left px-4 py-2 hover:bg-violet-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { setCloneToTabMenu(cloneToTabMenu ? null : nodeContextMenu.nodeId); }}>
+                  <GitBranch className="w-3.5 h-3.5 mr-2 text-violet-400" /> Clone to Tab...
+                </button>
+                {cloneToTabMenu === nodeContextMenu.nodeId && (
+                  <div className="ml-4 mb-1 bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
+                    {workspaces.filter(ws => ws.id !== activeTab).map(ws => (
+                      <button
+                        key={ws.id}
+                        className="w-full text-left px-4 py-1.5 hover:bg-violet-50 text-[11px] font-medium text-slate-600 flex items-center"
+                        onClick={() => { cloneNodeToWorkspace(nodeContextMenu.nodeId, ws.id); setCloneToTabMenu(null); setNodeContextMenu(null); }}
+                      >
+                        <ExternalLink className="w-3 h-3 mr-1.5 text-violet-400" /> {ws.name}
+                      </button>
+                    ))}
+                    {workspaces.filter(ws => ws.id !== activeTab).length === 0 && (
+                      <span className="block px-4 py-1.5 text-[11px] text-slate-400">No other tabs</span>
+                    )}
+                  </div>
+                )}
+              </div>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { duplicateNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Duplicate Card
               </button>
@@ -3052,15 +3112,36 @@ export default function WorkflowApp() {
 
         {/* --- Clone Panels (Three-Panel Split View) --- */}
         {showClonePanel && viewMode === 'canvas' && (() => {
-          // Find all source nodes that have clones
-          const sourceNodes = nodes.filter(n => {
-            return nodes.some(other => other.cloneSourceId === n.id);
+          // Find all source nodes that have clones across ALL workspaces
+          const allCloneSourceIds = new Set();
+          workspaces.forEach(ws => {
+            ws.nodes.forEach(n => {
+              if (n.cloneSourceId) allCloneSourceIds.add(n.cloneSourceId);
+            });
           });
 
-          // Get instances for the selected source
-          const cloneInstances = selectedCloneSourceId ? nodes.filter(n => 
-            n.id === selectedCloneSourceId || n.cloneSourceId === selectedCloneSourceId
-          ) : [];
+          const sourceNodes = [];
+          const seenSourceIds = new Set();
+          workspaces.forEach(ws => {
+            ws.nodes.forEach(n => {
+              if (allCloneSourceIds.has(n.id) && !seenSourceIds.has(n.id)) {
+                seenSourceIds.add(n.id);
+                sourceNodes.push({ ...n, _workspaceId: ws.id, _workspaceName: ws.name });
+              }
+            });
+          });
+
+          // Get instances for the selected source from ALL workspaces
+          const cloneInstances = [];
+          if (selectedCloneSourceId) {
+            workspaces.forEach(ws => {
+              ws.nodes.forEach(n => {
+                if (n.id === selectedCloneSourceId || n.cloneSourceId === selectedCloneSourceId) {
+                  cloneInstances.push({ ...n, _workspaceId: ws.id, _workspaceName: ws.name, _edges: ws.edges });
+                }
+              });
+            });
+          }
 
           return (
             <>
@@ -3079,6 +3160,7 @@ export default function WorkflowApp() {
                     sourceNodes.map(srcNode => {
                       const srcTheme = THEMES[srcNode.theme] || THEMES.amber;
                       const isSelected = selectedCloneSourceId === srcNode.id;
+                      const totalClones = workspaces.reduce((count, ws) => count + ws.nodes.filter(n => n.cloneSourceId === srcNode.id).length, 0);
                       return (
                         <div
                           key={srcNode.id}
@@ -3087,7 +3169,7 @@ export default function WorkflowApp() {
                           style={{ borderLeftColor: srcTheme.line, backgroundColor: isSelected ? undefined : `${srcTheme.line}10` }}
                         >
                           <span className="text-xs font-semibold text-slate-200 truncate block">{srcNode.title || `Node #${srcNode.id}`}</span>
-                          <span className="text-[10px] text-slate-400 mt-0.5 block">{nodes.filter(n => n.cloneSourceId === srcNode.id).length} clone(s)</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block">{totalClones} clone(s) &middot; {srcNode._workspaceName}</span>
                         </div>
                       );
                     })
@@ -3105,42 +3187,92 @@ export default function WorkflowApp() {
                     <p className="text-xs text-slate-400 text-center mt-4">Click a clone node to see its locations</p>
                   ) : (
                     cloneInstances.map(instance => {
-                      // Find prev/next based on edges
-                      const prevEdge = edges.find(e => e.target === instance.id);
-                      const nextEdge = edges.find(e => e.source === instance.id);
-                      const prevNode = prevEdge ? nodes.find(n => n.id === prevEdge.source) : null;
-                      const nextNode = nextEdge ? nodes.find(n => n.id === nextEdge.target) : null;
+                      // Find ALL prev and next edges for this instance
+                      const instanceEdges = instance._edges || [];
+                      const prevEdges = instanceEdges.filter(e => e.target === instance.id);
+                      const nextEdges = instanceEdges.filter(e => e.source === instance.id);
+                      
+                      // Find the workspace this instance belongs to
+                      const instanceWs = workspaces.find(ws => ws.id === instance._workspaceId);
+                      const wsNodes = instanceWs ? instanceWs.nodes : [];
+                      const wsGroups = instanceWs ? instanceWs.groups : [];
+
+                      const prevNodes = prevEdges.map(e => wsNodes.find(n => n.id === e.source)).filter(Boolean);
+                      const nextNodes = nextEdges.map(e => wsNodes.find(n => n.id === e.target)).filter(Boolean);
+
+                      const isOtherWorkspace = instance._workspaceId !== activeTab;
 
                       return (
                         <div
-                          key={instance.id}
+                          key={`${instance._workspaceId}-${instance.id}`}
                           onClick={() => {
-                            // Navigate to node on canvas
-                            if (workspaceRef.current) {
-                              const rect = workspaceRef.current.getBoundingClientRect();
-                              const centerX = rect.width / 2;
-                              const centerY = rect.height / 2;
-                              setTransform(prev => ({
-                                ...prev,
-                                x: centerX - instance.x * prev.scale - 170 * prev.scale,
-                                y: centerY - instance.y * prev.scale - 80 * prev.scale
-                              }));
+                            if (isOtherWorkspace) {
+                              // Navigate to other workspace and focus node
+                              setActiveTab(instance._workspaceId);
+                              setTimeout(() => {
+                                if (workspaceRef.current) {
+                                  const rect = workspaceRef.current.getBoundingClientRect();
+                                  const centerX = rect.width / 2;
+                                  const centerY = rect.height / 2;
+                                  setTransform(prev => ({
+                                    ...prev,
+                                    x: centerX - instance.x * prev.scale - 170 * prev.scale,
+                                    y: centerY - instance.y * prev.scale - 80 * prev.scale
+                                  }));
+                                }
+                                setFocusedNodeId(instance.id);
+                                setTimeout(() => setFocusedNodeId(null), 3000);
+                              }, 100);
+                            } else {
+                              // Navigate within same workspace
+                              if (workspaceRef.current) {
+                                const rect = workspaceRef.current.getBoundingClientRect();
+                                const centerX = rect.width / 2;
+                                const centerY = rect.height / 2;
+                                setTransform(prev => ({
+                                  ...prev,
+                                  x: centerX - instance.x * prev.scale - 170 * prev.scale,
+                                  y: centerY - instance.y * prev.scale - 80 * prev.scale
+                                }));
+                              }
+                              setFocusedNodeId(instance.id);
+                              setTimeout(() => setFocusedNodeId(null), 3000);
                             }
-                            setFocusedNodeId(instance.id);
-                            setTimeout(() => setFocusedNodeId(null), 3000);
                           }}
                           className="px-3 py-2.5 rounded-lg cursor-pointer bg-slate-800/40 hover:bg-slate-700/40 transition-all border border-slate-700/30 hover:border-slate-600/50"
                         >
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <span className="text-slate-400 truncate max-w-[80px]">{prevNode ? prevNode.title || `Node #${prevNode.id}` : '(start)'}</span>
-                            <span className="text-slate-500">→</span>
-                            <span className="text-slate-200 font-bold truncate max-w-[100px]">{instance.title || `Node #${instance.id}`}</span>
-                            <span className="text-slate-500">→</span>
-                            <span className="text-slate-400 truncate max-w-[80px]">{nextNode ? nextNode.title || `Node #${nextNode.id}` : '(end)'}</span>
+                          <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
+                            <span className="text-slate-200 font-bold truncate max-w-[140px]">{instance.title || `Node #${instance.id}`}</span>
+                            <span className="text-[9px] text-slate-500 ml-auto">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
+                          </div>
+                          <div className="mt-1.5 flex flex-col gap-0.5">
+                            {prevNodes.length > 0 ? prevNodes.map(pn => (
+                              <div key={pn.id} className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">from</span>
+                                <span className="text-slate-400 truncate max-w-[120px]">{pn.title || `Node #${pn.id}`}</span>
+                              </div>
+                            )) : (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">from</span>
+                                <span className="text-slate-500 italic">(start)</span>
+                              </div>
+                            )}
+                            {nextNodes.length > 0 ? nextNodes.map(nn => (
+                              <div key={nn.id} className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">to</span>
+                                <span className="text-slate-400 truncate max-w-[120px]">{nn.title || `Node #${nn.id}`}</span>
+                              </div>
+                            )) : (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="text-slate-500">to</span>
+                                <span className="text-slate-500 italic">(end)</span>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            <span className="text-[9px] text-slate-500">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
-                            {instance.groupId && <span className="text-[9px] text-slate-500">in {groups.find(g => g.id === instance.groupId)?.name || 'group'}</span>}
+                            {isOtherWorkspace && <span className="text-[9px] text-violet-400 font-medium">Tab: {instance._workspaceName}</span>}
+                            {!isOtherWorkspace && <span className="text-[9px] text-slate-500">{instance._workspaceName}</span>}
+                            {instance.groupId && <span className="text-[9px] text-slate-500">in {wsGroups.find(g => g.id === instance.groupId)?.name || 'group'}</span>}
                           </div>
                         </div>
                       );
