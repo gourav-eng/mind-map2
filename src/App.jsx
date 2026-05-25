@@ -1414,10 +1414,17 @@ export default function WorkflowApp() {
 
     const sourceId = target.cloneSourceId || target.id;
 
+    // Compute an offset position to avoid stacking clones
+    const targetWs = workspaces.find(ws => ws.id === targetWorkspaceId);
+    const targetNodes = targetWs ? targetWs.nodes : [];
+    const existingClonesCount = targetNodes.filter(n => n.cloneSourceId === sourceId).length;
+    const cloneX = 200 + 60 * existingClonesCount;
+    const cloneY = 200 + 60 * existingClonesCount;
+
     const clone = {
       id: nextId.toString(),
-      x: 200,
-      y: 200,
+      x: cloneX,
+      y: cloneY,
       title: target.title,
       content: target.content,
       expanded: true,
@@ -1465,49 +1472,51 @@ export default function WorkflowApp() {
   };
 
   const updateNode = (id, updates) => {
-    // First update the active workspace
-    updateActiveWorkspace(ws => {
-      let updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
-      return {
-        nodes: updatedNodes,
-        groups: computeLayout(ws.groups, updatedNodes)
-      };
-    });
+    // Single atomic state update that handles both the direct node edit
+    // and cross-workspace clone propagation in one pass
+    const syncFields = {};
+    if (updates.title !== undefined) syncFields.title = updates.title;
+    if (updates.content !== undefined) syncFields.content = updates.content;
+    const shouldPropagate = Object.keys(syncFields).length > 0;
 
-    // Clone propagation across ALL workspaces: if title or content changed, sync to all clones
-    if (updates.title !== undefined || updates.content !== undefined) {
-      const syncFields = {};
-      if (updates.title !== undefined) syncFields.title = updates.title;
-      if (updates.content !== undefined) syncFields.content = updates.content;
-
-      setWorkspaces(prev => {
-        // Find the edited node across all workspaces
-        let editedNode = null;
+    setWorkspaces(prev => {
+      // Find the source id for clone propagation
+      let sourceId = null;
+      if (shouldPropagate) {
         for (const ws of prev) {
           const found = ws.nodes.find(n => n.id === id);
-          if (found) { editedNode = { ...found, ...updates }; break; }
+          if (found) {
+            sourceId = found.cloneSourceId || found.id;
+            break;
+          }
         }
-        if (!editedNode) return prev;
+      }
 
-        const sourceId = editedNode.cloneSourceId || editedNode.id;
+      return prev.map(ws => {
+        const isActiveWs = ws.id === activeTab;
+        const hasEditedNode = ws.nodes.some(n => n.id === id);
+        const hasRelatedClone = shouldPropagate && sourceId && ws.nodes.some(n =>
+          n.id === sourceId || n.cloneSourceId === sourceId
+        );
 
-        return prev.map(ws => {
-          const hasRelated = ws.nodes.some(n => 
-            n.id === sourceId || n.cloneSourceId === sourceId
-          );
-          if (!hasRelated) return ws;
+        if (!isActiveWs && !hasEditedNode && !hasRelatedClone) return ws;
 
-          const updatedNodes = ws.nodes.map(n => {
-            if (n.id === id) return { ...n, ...updates }; // already updated
-            if (n.id === sourceId || n.cloneSourceId === sourceId) {
-              return { ...n, ...syncFields };
-            }
-            return n;
-          });
-          return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
+        const updatedNodes = ws.nodes.map(n => {
+          // Apply direct update to the edited node
+          if (n.id === id) return { ...n, ...updates };
+          // Propagate title/content to related clones
+          if (shouldPropagate && sourceId && (n.id === sourceId || n.cloneSourceId === sourceId)) {
+            return { ...n, ...syncFields };
+          }
+          return n;
         });
+
+        const nodesChanged = updatedNodes !== ws.nodes;
+        if (!nodesChanged && !isActiveWs && !hasEditedNode && !hasRelatedClone) return ws;
+
+        return { ...ws, nodes: updatedNodes, groups: computeLayout(ws.groups, updatedNodes) };
       });
-    }
+    });
   };
 
   const processImage = (file, nodeId, compress) => {
@@ -3246,8 +3255,8 @@ export default function WorkflowApp() {
                             <span className="text-[9px] text-slate-500 ml-auto">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
                           </div>
                           <div className="mt-1.5 flex flex-col gap-0.5">
-                            {prevNodes.length > 0 ? prevNodes.map(pn => (
-                              <div key={pn.id} className="flex items-center gap-1 text-[10px]">
+                            {prevNodes.length > 0 ? prevNodes.map((pn, idx) => (
+                              <div key={`prev-${prevEdges[idx].source}-${prevEdges[idx].target}-${idx}`} className="flex items-center gap-1 text-[10px]">
                                 <span className="text-slate-500">from</span>
                                 <span className="text-slate-400 truncate max-w-[120px]">{pn.title || `Node #${pn.id}`}</span>
                               </div>
@@ -3257,8 +3266,8 @@ export default function WorkflowApp() {
                                 <span className="text-slate-500 italic">(start)</span>
                               </div>
                             )}
-                            {nextNodes.length > 0 ? nextNodes.map(nn => (
-                              <div key={nn.id} className="flex items-center gap-1 text-[10px]">
+                            {nextNodes.length > 0 ? nextNodes.map((nn, idx) => (
+                              <div key={`next-${nextEdges[idx].source}-${nextEdges[idx].target}-${idx}`} className="flex items-center gap-1 text-[10px]">
                                 <span className="text-slate-500">to</span>
                                 <span className="text-slate-400 truncate max-w-[120px]">{nn.title || `Node #${nn.id}`}</span>
                               </div>
