@@ -1,0 +1,29 @@
+{
+  "project_type": "React SPA with Vite bundler and Tailwind CSS",
+  "language": "JavaScript (JSX)",
+  "build_system": "Vite with npm scripts",
+  "test_framework": "None - no test infrastructure exists",
+  "build_command": "npm run build",
+  "test_command": "npm run build",
+  "verification_instructions": "Run `npm run build` to confirm the app builds without errors. The app uses no test framework so build verification is the primary check.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/mind-map2 && npm install",
+  "environment_constraints": "OPEN_INTERNET - full network access available. No test framework installed.",
+  "contribution_requirements": "Single file app (src/App.jsx ~3122 lines). All logic lives in one component. Uses Tailwind for styling, lucide-react for icons.",
+  "key_patterns": {
+    "state_management": "useState hooks at component level, updateActiveWorkspace(updater) pattern for workspace mutations",
+    "node_data_model": "{ id, x, y, title, content, expanded, theme, groupId, status, priority, linkToTab, image }",
+    "edge_data_model": "{ id, source, target }",
+    "workspace_model": "{ id, name, groups, nodes, edges }",
+    "history": "takeSnapshot() before mutations for undo/redo support",
+    "layout": "computeLayout() auto-adjusts group boundaries based on child positions",
+    "rendering": "Canvas view (transform layer with absolute positioning) and Outline view (list-based)",
+    "node_creation": "addNode(clientX, clientY, targetGroupId) creates node with nextId counter",
+    "context_menus": "Right-click shows contextMenu (canvas bg), nodeContextMenu (per node), groupContextMenu (per group)",
+    "sidebar": "Left sidebar with workspace list, view toggle (canvas/outline), stats, password protection"
+  },
+  "relevant_files": [
+    "src/App.jsx"
+  ],
+  "directory_structure": "Single-page app: src/App.jsx is the entire application, src/index.css has Tailwind directives, src/main.jsx is React entry point. Package uses react, react-dom, lucide-react, vite, tailwindcss."
+}
