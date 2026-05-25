@@ -1,0 +1,14 @@
+{
+  "task_id": "task-node-types-and-clone-system",
+  "task_description": "Add a node type system (Task vs Concept nodes), a clone node feature where nodes can appear in multiple places while staying synced, and a three-panel split view for browsing clone nodes and their locations with navigation back to the main canvas.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "Build passes cleanly. All features verified: nodeType system (task/concept), cloneNode with bidirectional propagation, three-panel split view with distinct dark backgrounds (#1a1a2e, #16213e, #0f3460), navigation from location panel to canvas with focus highlighting. Review issues fixed: orphaned clone cleanup on delete, duplicate/paste cloneSourceId reset, outline view concept node guards, clone badge flex positioning."
+  }
+}

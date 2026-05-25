@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add two node types (Task and Concept), a clone node system where a single node can appear in multiple places, and a three-panel split view (Show Clone Nodes) that displays clone nodes list and their locations with navigation back to the main canvas.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Node Type System: Add a `nodeType` property to the node data model with two values: 'task' (default, existing behavior with status/priority) and 'concept' (brainstorming-style, no task management fields). Update the `addNode` function to accept a nodeType parameter. Update the context menu to offer 'Add Task Node' and 'Add Concept Node'. Update the node tag badge rendering (currently shows 'TASK {id}') to show 'TASK' or 'CONCEPT' depending on type. For concept nodes, hide the status/priority badges and fields. Use a different icon for concept nodes (Sparkles instead of FileText).",
+    "Step 2 - Clone Node Data Model: Add a `cloneSourceId` property to nodes. A clone node references a source node by ID. When a node is cloned, a new node is created at a different position with `cloneSourceId` set to the original's ID. The clone shares the same title/content (synced from source) but has its own position (x, y), groupId, and connections (edges). Add a `cloneNode` function similar to `duplicateNode` but sets `cloneSourceId`. Add 'Clone Node' option to the node context menu (nodeContextMenu). When a source node's title or content is edited, propagate changes to all clones. Add a small visual indicator on clone nodes (a badge or icon showing it is a clone, e.g., a small Copy icon overlay).",
+    "Step 3 - Show Clone Nodes Three-Panel Split View: Add a `showClonePanel` state (boolean, default false). Add a 'Show Clone Nodes' button in the sidebar (under the view toggle area) or in the More menu. When activated, the layout splits the right portion of the workspace into three panels side by side: (A) Main canvas - leftmost, background color `#1a1a2e` (dark navy), (B) Clone nodes list panel - middle, background color `#16213e` (dark blue), width ~250px, shows a vertical scrollable list of all nodes that have clones (i.e., nodes whose ID appears as a `cloneSourceId` on other nodes). Each item shows the node title with a colored left border matching its theme color. (C) Clone node location panel - rightmost, background color `#0f3460` (dark teal-blue), width ~350px, initially shows a placeholder message 'Click a clone node to see its locations'.",
+    "Step 4 - Clone Node Location Display: When a node is clicked in the clone nodes list panel (B), the location panel (C) populates with rows showing each place that clone appears. Each row displays: [Previous Node] -> [Clone Node] -> [Next Node], where previous/next are determined by the edges connected to that clone instance. If no previous or next edge exists, show a placeholder like '(start)' or '(end)'. Each row should be clickable.",
+    "Step 5 - Navigation from Location Panel to Canvas: When a row in the location panel (C) is clicked, the main canvas should: (1) close or keep the clone panels, (2) pan/zoom the canvas to center on that specific clone node instance, (3) briefly highlight the node with a pulsing ring animation (reuse the existing `focusedNodeId` mechanism which already adds 'ring-4 ring-indigo-500 animate-[pulse_1.5s_infinite]'). Set `focusedNodeId` to the clicked clone's ID and auto-clear it after 3 seconds.",
+    "Step 6 - Visual Polish: Ensure all three panel backgrounds are distinctly different dark colors. The clone list items should have colored backgrounds (use the node's theme color at low opacity). Add smooth transitions when opening/closing the clone panels. Add a close button (X) on the clone panel header to dismiss it. Make sure the panels are responsive - on mobile, stack vertically or use a full-screen overlay approach."
+  ],
+  "acceptance_criteria": [
+    "Two node types exist: Task (with status/priority) and Concept (without status/priority, different icon/badge)",
+    "Nodes can be cloned via context menu, creating a linked copy that syncs title/content with the source",
+    "Clone nodes have a visual indicator showing they are clones",
+    "Show Clone Nodes button activates a three-panel split view",
+    "The clone list panel shows all nodes that have clone instances",
+    "Clicking a node in the clone list shows its locations (with prev/next connected nodes) in the location panel",
+    "Clicking a location row navigates the main canvas to that node and highlights it",
+    "All three panels have different dark background colors",
+    "The app builds without errors via `npm run build`"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/mind-map2 && npm install && npm run build` to confirm the build passes",
+    "Verify the node type system by searching for 'nodeType' in the code and confirming addNode supports both types",
+    "Verify clone system by searching for 'cloneSourceId' and confirming the clone propagation logic exists",
+    "Verify three-panel layout by searching for the three distinct background colors (#1a1a2e, #16213e, #0f3460)"
+  ],
+  "blocked_reason": null,
+  "findings": "Build succeeds with npm run build. All changes in src/App.jsx only. Added GitBranch to lucide-react imports. Clone propagation works through the updateNode function - when title or content changes, it syncs to all related clones bidirectionally."
+}

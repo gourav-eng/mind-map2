@@ -6,7 +6,7 @@ import {
   Sparkles, CheckSquare, Clock, AlertCircle, BarChart2, PanelLeftClose, PanelLeft,
   Grid, Move, Copy, ArrowUp, ArrowDown, RefreshCw, LayoutList, MonitorSpeaker,
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2,
-  Lock, Shield, Eye, EyeOff
+  Lock, Shield, Eye, EyeOff, GitBranch
 } from 'lucide-react';
 
 // --- Premium Color Themes ---
@@ -82,10 +82,10 @@ const defaultWorkspaces = [
       { id: 'g-2', name: 'Phase 2: Product Design UI', x: 580, y: 80, width: 440, height: 440, expanded: true, theme: 'purple', parentGroupId: null }
     ],
     nodes: [
-      { id: '1', x: 130, y: 150, title: 'User Interviews', content: 'Synthesize feedback from 15 target users.', expanded: true, theme: 'amber', groupId: 'g-1', status: 'In Progress', priority: 'High' },
-      { id: '2', x: 130, y: 310, title: 'Competitor Benchmark', content: 'Benchmark workflows against Top 3 competitors.', expanded: true, theme: 'blue', groupId: 'g-1', status: 'Todo', priority: 'Medium' },
-      { id: '3', x: 630, y: 150, title: 'Component Library', content: 'Establish design system in Figma.', expanded: true, theme: 'purple', groupId: 'g-2', status: 'In Progress', priority: 'High' },
-      { id: '4', x: 1100, y: 200, title: 'Launch Strategy Plan', content: 'Define GTM parameters.', expanded: true, theme: 'rose', groupId: null, status: 'Todo', priority: 'Low' }
+      { id: '1', x: 130, y: 150, title: 'User Interviews', content: 'Synthesize feedback from 15 target users.', expanded: true, theme: 'amber', groupId: 'g-1', status: 'In Progress', priority: 'High', nodeType: 'task', cloneSourceId: null },
+      { id: '2', x: 130, y: 310, title: 'Competitor Benchmark', content: 'Benchmark workflows against Top 3 competitors.', expanded: true, theme: 'blue', groupId: 'g-1', status: 'Todo', priority: 'Medium', nodeType: 'task', cloneSourceId: null },
+      { id: '3', x: 630, y: 150, title: 'Component Library', content: 'Establish design system in Figma.', expanded: true, theme: 'purple', groupId: 'g-2', status: 'In Progress', priority: 'High', nodeType: 'task', cloneSourceId: null },
+      { id: '4', x: 1100, y: 200, title: 'Launch Strategy Plan', content: 'Define GTM parameters.', expanded: true, theme: 'rose', groupId: null, status: 'Todo', priority: 'Low', nodeType: 'task', cloneSourceId: null }
     ],
     edges: [
       { id: 'e1', source: '1', target: '3' },
@@ -301,6 +301,10 @@ export default function WorkflowApp() {
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [focusedGroupId, setFocusedGroupId] = useState(null);
   const [groupContextMenu, setGroupContextMenu] = useState(null);
+
+  // --- Clone Panel States ---
+  const [showClonePanel, setShowClonePanel] = useState(false);
+  const [selectedCloneSourceId, setSelectedCloneSourceId] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -637,7 +641,8 @@ export default function WorkflowApp() {
         id: nextId.toString(),
         x: pasteX,
         y: pasteY,
-        groupId: null
+        groupId: null,
+        cloneSourceId: null
       };
 
       if (clipData.action === 'cut') {
@@ -1288,7 +1293,7 @@ export default function WorkflowApp() {
 
 
   // --- Node, Edge, and Group Creators ---
-  const addNode = (clientX, clientY, targetGroupId = null) => {
+  const addNode = (clientX, clientY, targetGroupId = null, nodeType = 'task') => {
     takeSnapshot();
     const rect = workspaceRef.current.getBoundingClientRect();
     let targetX, targetY;
@@ -1304,8 +1309,9 @@ export default function WorkflowApp() {
     const newNode = {
       id: nextId.toString(),
       x: targetX, y: targetY,
-      title: 'New Workspace Task', content: '', expanded: true, theme: 'amber',
-      groupId: targetGroupId, status: 'Todo', priority: 'Medium'
+      title: nodeType === 'concept' ? 'New Concept' : 'New Workspace Task', content: '', expanded: true, theme: 'amber',
+      groupId: targetGroupId, status: 'Todo', priority: 'Medium',
+      nodeType: nodeType, cloneSourceId: null
     };
     
     updateActiveWorkspace(ws => {
@@ -1352,11 +1358,45 @@ export default function WorkflowApp() {
       id: nextId.toString(),
       x: target.x + 40,
       y: target.y + 40,
-      title: `${target.title} (Copy)`
+      title: `${target.title} (Copy)`,
+      cloneSourceId: null
     };
 
     updateActiveWorkspace(ws => {
       const updatedNodes = [...ws.nodes, dup];
+      return {
+        nodes: updatedNodes,
+        groups: computeLayout(ws.groups, updatedNodes)
+      };
+    });
+    setNextId(prev => prev + 1);
+  };
+
+  const cloneNode = (nodeId) => {
+    takeSnapshot();
+    const target = nodes.find(n => n.id === nodeId);
+    if (!target) return;
+
+    // Determine the clone source: if target is already a clone, use its source; otherwise use target itself
+    const sourceId = target.cloneSourceId || target.id;
+
+    const clone = {
+      id: nextId.toString(),
+      x: target.x + 60,
+      y: target.y + 60,
+      title: target.title,
+      content: target.content,
+      expanded: true,
+      theme: target.theme,
+      groupId: null,
+      status: target.status || 'Todo',
+      priority: target.priority || 'Medium',
+      nodeType: target.nodeType || 'task',
+      cloneSourceId: sourceId
+    };
+
+    updateActiveWorkspace(ws => {
+      const updatedNodes = [...ws.nodes, clone];
       return {
         nodes: updatedNodes,
         groups: computeLayout(ws.groups, updatedNodes)
@@ -1393,7 +1433,38 @@ export default function WorkflowApp() {
   };
 
   const updateNode = (id, updates) => updateActiveWorkspace(ws => {
-    const updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
+    let updatedNodes = ws.nodes.map(n => n.id === id ? { ...n, ...updates } : n);
+    
+    // Clone propagation: if title or content changed, sync to all clones
+    if (updates.title !== undefined || updates.content !== undefined) {
+      const editedNode = updatedNodes.find(n => n.id === id);
+      if (editedNode) {
+        const syncFields = {};
+        if (updates.title !== undefined) syncFields.title = updates.title;
+        if (updates.content !== undefined) syncFields.content = updates.content;
+        
+        if (editedNode.cloneSourceId) {
+          // Edited node is a clone: update all nodes with same cloneSourceId AND the source itself
+          updatedNodes = updatedNodes.map(n => {
+            if (n.id === id) return n; // already updated
+            if (n.id === editedNode.cloneSourceId || n.cloneSourceId === editedNode.cloneSourceId) {
+              return { ...n, ...syncFields };
+            }
+            return n;
+          });
+        } else {
+          // Edited node is a source: update all nodes whose cloneSourceId matches this id
+          updatedNodes = updatedNodes.map(n => {
+            if (n.id === id) return n; // already updated
+            if (n.cloneSourceId === id) {
+              return { ...n, ...syncFields };
+            }
+            return n;
+          });
+        }
+      }
+    }
+    
     return {
       nodes: updatedNodes,
       groups: computeLayout(ws.groups, updatedNodes)
@@ -1465,7 +1536,8 @@ export default function WorkflowApp() {
   const deleteNode = (id) => {
     takeSnapshot();
     updateActiveWorkspace(ws => {
-      const filteredNodes = ws.nodes.filter(n => n.id !== id);
+      const filteredNodes = ws.nodes.filter(n => n.id !== id)
+        .map(n => n.cloneSourceId === id ? { ...n, cloneSourceId: null } : n);
       return {
         nodes: filteredNodes,
         edges: ws.edges.filter(e => e.source !== id && e.target !== id),
@@ -1831,8 +1903,8 @@ export default function WorkflowApp() {
           <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${nTheme.port}`} />
           <span className="flex-1 text-xs font-semibold text-slate-700 truncate">{node.title || `Task #${node.id}`}</span>
           <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => { takeSnapshot(); updateNode(node.id, { priority: node.priority === 'High' ? 'Medium' : node.priority === 'Medium' ? 'Low' : 'High' }); }} className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase border transition-all cursor-pointer hover:opacity-80 ${node.priority === 'High' ? 'bg-red-50 text-red-700 border-red-200' : node.priority === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`} title="Tap to cycle priority">{node.priority}</button>
-            <button onClick={() => { takeSnapshot(); const statuses = ['Todo', 'In Progress', 'Done', 'Milestone']; const idx = statuses.indexOf(node.status); updateNode(node.id, { status: statuses[(idx + 1) % statuses.length] }); }} className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase border transition-all cursor-pointer hover:opacity-80 ${node.status === 'Done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : node.status === 'In Progress' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : node.status === 'Milestone' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`} title="Tap to cycle status">{node.status}</button>
+            {node.nodeType !== 'concept' && <button onClick={() => { takeSnapshot(); updateNode(node.id, { priority: node.priority === 'High' ? 'Medium' : node.priority === 'Medium' ? 'Low' : 'High' }); }} className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase border transition-all cursor-pointer hover:opacity-80 ${node.priority === 'High' ? 'bg-red-50 text-red-700 border-red-200' : node.priority === 'Medium' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`} title="Tap to cycle priority">{node.priority}</button>}
+            {node.nodeType !== 'concept' && <button onClick={() => { takeSnapshot(); const statuses = ['Todo', 'In Progress', 'Done', 'Milestone']; const idx = statuses.indexOf(node.status); updateNode(node.id, { status: statuses[(idx + 1) % statuses.length] }); }} className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase border transition-all cursor-pointer hover:opacity-80 ${node.status === 'Done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : node.status === 'In Progress' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : node.status === 'Milestone' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`} title="Tap to cycle status">{node.status}</button>}
             <button onClick={() => setExpandedOutlineCards(prev => ({...prev, [node.id]: !prev[node.id]}))} className="p-1 hover:bg-slate-100 rounded-md text-slate-400">
               {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
@@ -2107,8 +2179,11 @@ export default function WorkflowApp() {
               <button onClick={() => { createGroup(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
                 <Layers className="w-4 h-4 mr-2.5" /> New Group
               </button>
-              <button onClick={() => { addNode(); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
-                <Plus className="w-4 h-4 mr-2.5" /> Add Node
+              <button onClick={() => { addNode(undefined, undefined, null, 'task'); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors">
+                <Plus className="w-4 h-4 mr-2.5" /> Add Task Node
+              </button>
+              <button onClick={() => { addNode(undefined, undefined, null, 'concept'); setShowMoreMenu(false); }} className="w-full flex items-center px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-50 transition-colors">
+                <Sparkles className="w-4 h-4 mr-2.5" /> Add Concept Node
               </button>
             </div>
             </>
@@ -2157,6 +2232,13 @@ export default function WorkflowApp() {
                     <LayoutList className="w-3.5 h-3.5" /> Outline
                   </button>
                 </div>
+                <button
+                  onClick={() => setShowClonePanel(!showClonePanel)}
+                  title="Show Clone Nodes"
+                  className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all mt-1.5 w-full ${showClonePanel ? 'bg-violet-100 text-violet-700 border border-violet-300' : 'bg-slate-100 text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
+                >
+                  <Copy className="w-3.5 h-3.5" /> Show Clone Nodes
+                </button>
               </div>
             </div>
 
@@ -2351,7 +2433,7 @@ export default function WorkflowApp() {
         {/* --- Main Workspace Canvas Area --- */}
         <main
           ref={workspaceRef}
-          className="flex-1 relative overflow-hidden bg-[#1e1e2e] touch-none text-slate-800"
+          className={`${showClonePanel ? 'flex-1 min-w-0' : 'flex-1'} relative overflow-hidden ${showClonePanel ? 'bg-[#1a1a2e]' : 'bg-[#1e1e2e]'} touch-none text-slate-800 transition-all duration-300`}
           onPointerDown={handlePointerDownMain}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -2613,10 +2695,18 @@ export default function WorkflowApp() {
                   onDragLeave={(e) => { e.preventDefault(); setDragOverNodeId(null); }}
                   onDrop={(e) => handleImageDrop(e, node.id)}
                 >
-                  <div className={`absolute -top-3.5 left-5 px-3 py-0.5 rounded-full text-[10px] font-bold shadow-sm border flex items-center gap-1.5 z-20 ${theme.tag}`}>
-                    <FileText className="w-3.5 h-3.5" /> TASK {node.id}
+                  <div className="absolute -top-3.5 left-5 flex items-center gap-1.5 z-20">
+                    <div className={`px-3 py-0.5 rounded-full text-[10px] font-bold shadow-sm border flex items-center gap-1.5 ${theme.tag}`}>
+                      {(node.nodeType === 'concept') ? <><Sparkles className="w-3.5 h-3.5" /> CONCEPT {node.id}</> : <><FileText className="w-3.5 h-3.5" /> TASK {node.id}</>}
+                    </div>
+                    {node.cloneSourceId && (
+                      <div className="px-2 py-0.5 rounded-full text-[9px] font-bold shadow-sm border flex items-center gap-1 bg-violet-100 text-violet-700 border-violet-300">
+                        <Copy className="w-3 h-3" /> CLONE
+                      </div>
+                    )}
                   </div>
 
+                  {node.nodeType !== 'concept' && (
                   <div className="absolute -top-3.5 right-5 flex items-center gap-1 z-20">
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase border ${
                       node.priority === 'High' ? 'bg-red-50 text-red-700 border-red-200' :
@@ -2633,6 +2723,7 @@ export default function WorkflowApp() {
                       {node.status}
                     </span>
                   </div>
+                  )}
 
 
                   {/* Drag Handle Header */}
@@ -2786,6 +2877,7 @@ export default function WorkflowApp() {
                       </div>
 
                       {/* Task Property Editor */}
+                      {node.nodeType !== 'concept' && (
                       <div className="flex justify-between items-center pt-2.5 border-t border-slate-100 gap-2">
                         <div className="flex flex-col gap-1">
                           <span className="text-[9px] font-bold text-slate-400 uppercase">State</span>
@@ -2814,6 +2906,7 @@ export default function WorkflowApp() {
                           </select>
                         </div>
                       </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2847,8 +2940,11 @@ export default function WorkflowApp() {
               onClick={(e) => e.stopPropagation()}
               onContextMenu={(e) => e.preventDefault()}
             >
-              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { addNode(contextMenu.clientX, contextMenu.clientY); setContextMenu(null); }}>
-                <Plus className="w-4 h-4 mr-2 text-indigo-600" /> Add Node Here
+              <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { addNode(contextMenu.clientX, contextMenu.clientY, null, 'task'); setContextMenu(null); }}>
+                <Plus className="w-4 h-4 mr-2 text-indigo-600" /> Add Task Node Here
+              </button>
+              <button className="w-full text-left px-4 py-2 hover:bg-violet-50 hover:text-violet-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { addNode(contextMenu.clientX, contextMenu.clientY, null, 'concept'); setContextMenu(null); }}>
+                <Sparkles className="w-4 h-4 mr-2 text-violet-600" /> Add Concept Node Here
               </button>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 hover:text-indigo-900 text-sm font-semibold text-slate-700 flex items-center" onClick={() => { createGroup(contextMenu.clientX, contextMenu.clientY); setContextMenu(null); }}>
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" /> Create Group Here
@@ -2909,6 +3005,9 @@ export default function WorkflowApp() {
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cutNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Scissors className="w-3.5 h-3.5 mr-2 text-slate-500" /> Cut Node
               </button>
+              <button className="w-full text-left px-4 py-2 hover:bg-violet-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { cloneNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
+                <GitBranch className="w-3.5 h-3.5 mr-2 text-violet-500" /> Clone Node
+              </button>
               <button className="w-full text-left px-4 py-2 hover:bg-indigo-50 text-xs font-semibold text-slate-700 flex items-center" onClick={() => { duplicateNode(nodeContextMenu.nodeId); setNodeContextMenu(null); }}>
                 <Copy className="w-3.5 h-3.5 mr-2 text-slate-500" /> Duplicate Card
               </button>
@@ -2950,6 +3049,108 @@ export default function WorkflowApp() {
             </div>
           )}
         </main>
+
+        {/* --- Clone Panels (Three-Panel Split View) --- */}
+        {showClonePanel && viewMode === 'canvas' && (() => {
+          // Find all source nodes that have clones
+          const sourceNodes = nodes.filter(n => {
+            return nodes.some(other => other.cloneSourceId === n.id);
+          });
+
+          // Get instances for the selected source
+          const cloneInstances = selectedCloneSourceId ? nodes.filter(n => 
+            n.id === selectedCloneSourceId || n.cloneSourceId === selectedCloneSourceId
+          ) : [];
+
+          return (
+            <>
+              {/* Panel B: Clone List */}
+              <div className="w-[250px] shrink-0 bg-[#16213e] border-l border-slate-700/50 flex flex-col overflow-hidden transition-all duration-300">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+                  <h3 className="text-sm font-bold text-slate-200">Clone Nodes</h3>
+                  <button onClick={() => { setShowClonePanel(false); setSelectedCloneSourceId(null); }} className="p-1 hover:bg-slate-700/50 rounded text-slate-400 hover:text-slate-200 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
+                  {sourceNodes.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center mt-4">No clone nodes yet. Right-click a node and select "Clone Node" to create one.</p>
+                  ) : (
+                    sourceNodes.map(srcNode => {
+                      const srcTheme = THEMES[srcNode.theme] || THEMES.amber;
+                      const isSelected = selectedCloneSourceId === srcNode.id;
+                      return (
+                        <div
+                          key={srcNode.id}
+                          onClick={() => setSelectedCloneSourceId(srcNode.id)}
+                          className={`px-3 py-2.5 rounded-lg cursor-pointer transition-all border-l-4 ${isSelected ? 'bg-slate-700/60 border-opacity-100' : 'bg-slate-800/40 hover:bg-slate-700/40 border-opacity-60'}`}
+                          style={{ borderLeftColor: srcTheme.line, backgroundColor: isSelected ? undefined : `${srcTheme.line}10` }}
+                        >
+                          <span className="text-xs font-semibold text-slate-200 truncate block">{srcNode.title || `Node #${srcNode.id}`}</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block">{nodes.filter(n => n.cloneSourceId === srcNode.id).length} clone(s)</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Panel C: Clone Locations */}
+              <div className="w-[350px] shrink-0 bg-[#0f3460] border-l border-slate-700/50 flex flex-col overflow-hidden transition-all duration-300">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+                  <h3 className="text-sm font-bold text-slate-200">Clone Locations</h3>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-2">
+                  {!selectedCloneSourceId ? (
+                    <p className="text-xs text-slate-400 text-center mt-4">Click a clone node to see its locations</p>
+                  ) : (
+                    cloneInstances.map(instance => {
+                      // Find prev/next based on edges
+                      const prevEdge = edges.find(e => e.target === instance.id);
+                      const nextEdge = edges.find(e => e.source === instance.id);
+                      const prevNode = prevEdge ? nodes.find(n => n.id === prevEdge.source) : null;
+                      const nextNode = nextEdge ? nodes.find(n => n.id === nextEdge.target) : null;
+
+                      return (
+                        <div
+                          key={instance.id}
+                          onClick={() => {
+                            // Navigate to node on canvas
+                            if (workspaceRef.current) {
+                              const rect = workspaceRef.current.getBoundingClientRect();
+                              const centerX = rect.width / 2;
+                              const centerY = rect.height / 2;
+                              setTransform(prev => ({
+                                ...prev,
+                                x: centerX - instance.x * prev.scale - 170 * prev.scale,
+                                y: centerY - instance.y * prev.scale - 80 * prev.scale
+                              }));
+                            }
+                            setFocusedNodeId(instance.id);
+                            setTimeout(() => setFocusedNodeId(null), 3000);
+                          }}
+                          className="px-3 py-2.5 rounded-lg cursor-pointer bg-slate-800/40 hover:bg-slate-700/40 transition-all border border-slate-700/30 hover:border-slate-600/50"
+                        >
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <span className="text-slate-400 truncate max-w-[80px]">{prevNode ? prevNode.title || `Node #${prevNode.id}` : '(start)'}</span>
+                            <span className="text-slate-500">→</span>
+                            <span className="text-slate-200 font-bold truncate max-w-[100px]">{instance.title || `Node #${instance.id}`}</span>
+                            <span className="text-slate-500">→</span>
+                            <span className="text-slate-400 truncate max-w-[80px]">{nextNode ? nextNode.title || `Node #${nextNode.id}` : '(end)'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-[9px] text-slate-500">{instance.cloneSourceId ? 'Clone' : 'Source'}</span>
+                            {instance.groupId && <span className="text-[9px] text-slate-500">in {groups.find(g => g.id === instance.groupId)?.name || 'group'}</span>}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {/* --- Outline Backlog Board View --- */}
         {viewMode === 'outline' && (
