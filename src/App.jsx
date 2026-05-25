@@ -655,18 +655,32 @@ export default function WorkflowApp() {
     setFocusedNodeId(null);
   }, [activeTab]);
 
-  // --- Secret Keyboard Shortcut (Ctrl+Shift+P) and Escape dismiss ---
+  // --- Secret Keyboard Shortcuts (Ctrl+Shift+P toggle, Ctrl+Shift+? cycle, Escape dismiss) ---
   useEffect(() => {
     const handleSecretKey = (e) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'P') {
         e.preventDefault();
-        setShowProjectPanel(true);
-        setProjectPanelMode('main');
-        setProjectError('');
-        setProjectNameInput('');
-        setProjectPasswordInput('');
-        setProjectPasswordConfirm('');
-        setSelectedProjectId(null);
+        setShowProjectPanel(prev => {
+          if (prev) return false;
+          setProjectPanelMode('main');
+          setProjectError('');
+          setProjectNameInput('');
+          setProjectPasswordInput('');
+          setProjectPasswordConfirm('');
+          setSelectedProjectId(null);
+          return true;
+        });
+      }
+      // Ctrl+Shift+? (Ctrl+Shift+/) - instant cycle to next project without password
+      if (e.ctrlKey && e.shiftKey && (e.key === '?' || e.key === '/')) {
+        e.preventDefault();
+        const currentProjects = projectsRef.current;
+        if (currentProjects.length > 1) {
+          const currentIdx = currentProjects.findIndex(p => p.id === activeProjectId);
+          const nextIdx = (currentIdx + 1) % currentProjects.length;
+          const targetId = currentProjects[nextIdx].id;
+          cycleToProject(targetId);
+        }
       }
       if (e.key === 'Escape' && showProjectPanel) {
         setShowProjectPanel(false);
@@ -674,7 +688,7 @@ export default function WorkflowApp() {
     };
     window.addEventListener('keydown', handleSecretKey);
     return () => window.removeEventListener('keydown', handleSecretKey);
-  }, [showProjectPanel]);
+  }, [showProjectPanel, activeProjectId]);
 
   // --- Auto-hide sidebar on small screens ---
   useEffect(() => {
@@ -1148,6 +1162,46 @@ export default function WorkflowApp() {
     setProjects(prev => {
       const updated = prev.map(p => p.id === activeProjectId
         ? { ...p, workspaces, activeTab, nextId }
+        : p
+      );
+      localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+      return updated;
+    });
+    // Load target project
+    let targetWorkspaces = target.workspaces || defaultWorkspaces;
+    targetWorkspaces = targetWorkspaces.map(ws => {
+      const grps = ws.groups || [];
+      const nds = ws.nodes || [];
+      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+    });
+    setActiveProjectId(targetId);
+    setWorkspaces(targetWorkspaces);
+    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
+    setNextId(target.nextId || 10);
+    setStoredPassword(target.password || '');
+    setPasswordEnabled(!!target.password);
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', targetId);
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+    setTransform({ x: 0, y: 0, scale: 1 });
+    // Reset history
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  };
+
+  // Passwordless project switch - used by Ctrl+Shift+? cycling and direct switch from panel
+  const cycleToProject = (targetId) => {
+    const target = projectsRef.current.find(p => p.id === targetId);
+    if (!target) return;
+    const { workspaces: currentWs, activeTab: currentTab, nextId: currentNextId } = stateRef.current;
+    // Save current project state
+    setProjects(prev => {
+      const updated = prev.map(p => p.id === activeProjectId
+        ? { ...p, workspaces: currentWs, activeTab: currentTab, nextId: currentNextId }
         : p
       );
       localStorage.setItem('nexus-app-state', JSON.stringify(updated));
@@ -2469,29 +2523,41 @@ export default function WorkflowApp() {
                 <div className="flex items-center justify-center mb-2">
                   <Lock className="w-5 h-5 text-slate-400" />
                 </div>
-                {!selectedProjectId ? (
+                {isGate ? (
+                  <>
+                    {!selectedProjectId ? (
+                      <div className="space-y-2">
+                        {projects.filter(p => p.id !== activeProjectId).map(p => (
+                          <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left">
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <input
+                          type="password"
+                          value={projectPasswordInput}
+                          onChange={(e) => setProjectPasswordInput(e.target.value)}
+                          placeholder="Enter key"
+                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
+                        />
+                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
+                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+                          Confirm
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
                   <div className="space-y-2">
                     {projects.filter(p => p.id !== activeProjectId).map(p => (
-                      <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left">
+                      <button key={p.id} onClick={() => cycleToProject(p.id)} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left">
                         {p.name}
                       </button>
                     ))}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <input
-                      type="password"
-                      value={projectPasswordInput}
-                      onChange={(e) => setProjectPasswordInput(e.target.value)}
-                      placeholder="Enter key"
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      autoFocus
-                      onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
-                    />
-                    {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                    <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                      Confirm
-                    </button>
                   </div>
                 )}
                 <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
