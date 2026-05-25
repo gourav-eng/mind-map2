@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "fix",
   "description": "Convert Ctrl+Shift+/ from cycling through all projects to a 'boss key' that only switches to the default (first) project instantly. Default project must be password-free. All other projects require passwords via Ctrl+Shift+P panel.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Modify Ctrl+Shift+/ handler: Instead of cycling to next project, find the default/first project and switch to it immediately via cycleToProject. If already on the default project, do nothing.",
     "Step 2 - Make the default project (first project, index 0) password-free: Remove password from the default project, ensure it never requires authentication. On init, set passwordEnabled to false if the active project is the default.",
@@ -21,5 +21,5 @@
   ],
   "verification": ["npm run build"],
   "blocked_reason": null,
-  "findings": null
+  "findings": "Implementation complete. Build passes. Key changes: (1) Ctrl+Shift+/ only targets projects[0] (the default), does nothing if already there. (2) Default project password stripped on init and during migration. (3) Non-gate switch panel now has a two-step flow for non-default projects: select project -> enter password. (4) Default project gets passwordless switch via cycleToProject in both gate and non-gate modes. (5) Change Key button hidden when activeProjectId matches first project. (6) Delete panel excludes the default project. (7) Subtle '*' indicator shows next to default project name in switch lists."
 }
