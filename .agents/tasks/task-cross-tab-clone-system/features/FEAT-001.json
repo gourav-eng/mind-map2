@@ -23,5 +23,5 @@
   ],
   "verification": ["npm run build"],
   "blocked_reason": null,
-  "findings": "All 6 steps implemented successfully. Build passes with no errors. Key changes: (1) Clone locations panel now uses edges.filter() to show ALL connections, (2) Clone panel searches all workspaces for sources and instances, (3) updateNode syncs clones across all workspaces using setWorkspaces, (4) Added Clone to Tab context menu with workspace picker, (5) Clicking clone in another workspace switches tabs and focuses the node. Added cloneToTabMenu state for the nested workspace picker."
+  "findings": "Review fixes applied: (1) Merged double setState race in updateNode into a single setWorkspaces call that handles both direct node update and cross-workspace clone propagation atomically, (2) Clone placement now offsets at (200 + 60*existingClonesCount, 200 + 60*existingClonesCount) to avoid stacking, (3) Clone panel edge keys now use edge source/target/index combo for uniqueness instead of bare node ids."
 }
