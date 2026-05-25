@@ -1129,6 +1129,11 @@ export default function WorkflowApp() {
       setProjectError('Both fields required.');
       return;
     }
+    const nameExists = projects.some(p => p.name.toLowerCase() === projectNameInput.trim().toLowerCase());
+    if (nameExists) {
+      setProjectError('A project with this name already exists.');
+      return;
+    }
     const wsId = `ws-${Date.now()}`;
     const hashedPass = await hashPassword(projectPasswordInput.trim());
     const newProj = {
