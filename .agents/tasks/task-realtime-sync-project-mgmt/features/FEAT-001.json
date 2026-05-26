@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement Supabase Realtime multi-device sync with per-device independent project selection, fix project switching bugs, and restructure cloud save to be project-aware. Currently the app saves all workspaces to a single Supabase row (id='main') with no realtime subscriptions. This feature adds: (1) project-aware cloud save so each project gets its own row in the mind_maps table, (2) Supabase Realtime subscriptions (postgres_changes) so all connected devices get live updates, (3) per-device active project stored in localStorage so each device/tab can independently view a different project while receiving real-time updates for its active project, (4) fix the project creation/switching bugs where projects create but UI doesn't update properly.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Restructure Cloud Save: In src/App.jsx, modify `saveToCloud` to save each project to its own row in the `mind_maps` table using the project ID as the row id (instead of hardcoded 'main'). Modify `loadFromCloud` to load all rows from the mind_maps table and reconstruct the projects array. The data stored per row should be: { id: projectId, data: { name, password, workspaces, activeTab, nextId }, updated_at }.",
+    "Step 2 - Add Supabase Realtime Subscription: In src/App.jsx, after initialization, subscribe to the `mind_maps` table using `supabase.channel('mind-maps-sync').on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, payload => { ... }).subscribe()`. When an INSERT/UPDATE event arrives for the active project's row, merge the incoming data into state (but only if the change was made by another device - use a `lastSaveRef` timestamp to skip self-echoes). When the active project changes, re-subscribe to filter for just that project's row.",
+    "Step 3 - Per-Device Active Project: Keep using localStorage key 'nexus-active-project' for the device-local active project ID. This already exists but ensure it's truly independent - when a realtime update arrives for a different project than what this device has active, just update the projects array in memory without switching the view. Only the active project's data should be rendered.",
+    "Step 4 - Fix Project Switching Bugs: The current `switchProject` and `cycleToProject` functions have race conditions. Fix: (a) ensure state updates from switching are batched together, (b) after creating a new project, immediately save it to cloud so other devices can see it, (c) when loading from cloud on init, merge with any localStorage projects that aren't in the cloud yet (handles offline creation), (d) ensure the project list UI re-renders after creation by properly triggering state updates.",
+    "Step 5 - Fix Export/Import for All Projects: Modify `exportData` to export ALL projects (the entire projects array with all their workspaces, nodes, edges, groups, settings). Modify `handleImport` to detect if the imported file is the new multi-project format or legacy single-workspace format and handle both. On import of all-projects format, replace the entire projects state and save all to cloud.",
+    "Step 6 - Debounced Cloud Save: The current cloud save fires on every workspaces change which is too aggressive. Add a debounce (1000ms) to `saveToCloud` so rapid edits (typing, dragging) don't flood the database. Use a ref-based debounce pattern similar to the existing localStorage save timer.",
+    "Step 7 - Connection Status Indicator: Add a small indicator in the top-right corner showing real-time connection status (connected/disconnected/syncing). Use the Supabase channel status events to track this. Show a green dot when connected, yellow when syncing, red when disconnected."
+  ],
+  "acceptance_criteria": [
+    "Running `npm run build` passes with no errors",
+    "The saveToCloud function saves project data using the project ID as the row key (not hardcoded 'main')",
+    "A Supabase Realtime subscription is established that listens for changes on the mind_maps table",
+    "When data changes on one device, other devices with the same active project see the update without manual refresh",
+    "Each device stores its active project ID in localStorage independently - opening a different project on device A does not affect device B",
+    "Creating a new project immediately saves it to the cloud",
+    "The project switch button/list works correctly after creation (no missing UI elements)",
+    "Export produces a JSON file containing ALL projects with complete data",
+    "Import detects and handles both multi-project format and legacy single-workspace format",
+    "Cloud saves are debounced to avoid flooding (at least 1000ms between saves)",
+    "A connection status indicator is visible showing sync state"
+  ],
+  "verification": [
+    "Run `npm run build` and confirm it succeeds with no errors"
+  ],
+  "blocked_reason": null,
+  "findings": "All changes implemented in src/App.jsx. Build passes successfully with npm run build. Key implementation notes: (1) useCallback used for saveToCloud and debouncedSaveToCloud to maintain stable references, (2) Realtime subscription uses activeProjectId in the dependency array so it re-subscribes when the active project changes, (3) Self-echo prevention uses a 2-second window via lastSaveTimestampRef, (4) Legacy 'main' row migration is handled transparently on load, (5) deleteProject now also removes the row from the cloud, (6) Connection status indicator is positioned in the top-right of the canvas with conditional rendering only when supabase client exists."
+}

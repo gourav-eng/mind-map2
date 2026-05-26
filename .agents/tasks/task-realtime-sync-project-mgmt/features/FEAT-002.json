@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Redesign the hidden project management panel into a professional Adobe-style file management overlay. Currently the panel is a minimal modal with basic text inputs. Transform it into a polished, production-grade project management dialog with: (1) a proper overlay/modal with blur backdrop, (2) tabbed navigation (New, Open, Settings), (3) project list with visual cards showing name/last-modified/workspace-count, (4) proper create-project form with name/description/settings, (5) project settings editor, (6) the access mechanism changed from Ctrl+Shift+P (which conflicts with browser print) to Ctrl+Shift+K plus triple-click on app logo (keep triple-click, also add the new keyboard shortcut). All settings remain hidden - no visible settings button/menu in the normal UI.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Change Keyboard Shortcut: In the `handleSecretKey` event handler in src/App.jsx, change the keyboard shortcut from Ctrl+Shift+P to Ctrl+Shift+K. Keep the triple-click on logo functionality (handleLogoTap). Keep the boss key (Ctrl+Shift+/) unchanged.",
+    "Step 2 - Redesign Panel Structure: Replace the current `renderProjectPanel` function with a new Adobe-style overlay. The overlay should: (a) have a dark backdrop with blur, (b) use a larger modal (max-w-lg instead of max-w-xs), (c) have a left sidebar with navigation icons/tabs: 'New Project', 'Open Project', 'Project Settings', 'Export/Import', (d) have a main content area that changes based on selected tab, (e) have smooth enter/exit animations using Tailwind's animate utilities.",
+    "Step 3 - New Project Tab: Create a polished 'New Project' form inside the panel with: project name input (styled), optional description textarea, a password/key field with show/hide toggle, a confirm button with loading state. Add validation with inline error messages. The form should feel like Adobe's New Document dialog.",
+    "Step 4 - Open Project Tab: Create a project browser/switcher showing all projects as visual cards in a grid/list. Each card shows: project name, number of workspaces, last modified date (track this), a colored indicator dot. Clicking a password-protected project shows an inline password prompt. The default project (first) can be opened without password. Active project is highlighted.",
+    "Step 5 - Project Settings Tab: Provide options for the current active project: rename, change password, delete (with confirmation). Only show for non-default projects. Include a visual section for project metadata.",
+    "Step 6 - Export/Import Tab: Move the export/import functionality into this panel. Show two clear sections: 'Export All Projects' (single button that downloads the full JSON) and 'Import Projects' (file picker with format detection). Add a visual preview of what will be imported before confirming.",
+    "Step 7 - Polish and Animations: Add transition animations for tab switching (fade/slide), hover effects on project cards, focus states on inputs, and proper keyboard navigation (Tab/Enter/Escape). Ensure the panel looks premium with proper spacing, typography (font-semibold headings, text-sm body), and subtle shadows."
+  ],
+  "acceptance_criteria": [
+    "Running `npm run build` passes with no errors",
+    "Ctrl+Shift+K opens the project panel (Ctrl+Shift+P no longer triggers it)",
+    "Triple-click on the app logo still opens the project panel",
+    "The panel has a tabbed/sidebar navigation with at least: New, Open, Settings, Export/Import sections",
+    "The New Project form has name input, password field with show/hide toggle, and validates before submission",
+    "The Open Project view shows all projects as cards with visual information (name, workspace count)",
+    "Project Settings allows renaming, password change, and deletion with confirmation",
+    "Export/Import is accessible from within the panel",
+    "Escape key closes the panel",
+    "The panel has professional animations and styling (backdrop blur, smooth transitions)",
+    "No settings buttons or project management UI is visible in the normal app interface"
+  ],
+  "verification": [
+    "Run `npm run build` and confirm it succeeds with no errors"
+  ],
+  "blocked_reason": null,
+  "findings": "All changes implemented in src/App.jsx. Build passes with npm run build. Key notes: (1) Keyboard shortcut changed from Ctrl+Shift+P to Ctrl+Shift+K, (2) Project panel modes changed from main/create/switch/delete/changePassword to new/open/settings/export, (3) Added Settings icon to lucide-react imports, (4) Added panelImportRef, handlePanelImport, confirmImport helper functions for the import preview flow, (5) Added state vars: projectDescInput, showPasswordField, importPreview, deleteConfirm, (6) Gate mode (isGate=true) forces the Open tab and hides close/New/Export/Settings tabs, (7) The createProject function now resets to 'open' mode after success instead of old 'main' mode."
+}
