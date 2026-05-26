@@ -11,7 +11,9 @@ import {
 import supabase from './supabase'
 
 // --- Device ID for self-echo suppression in realtime sync ---
-const deviceId = crypto.randomUUID();
+const deviceId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+  ? crypto.randomUUID() 
+  : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 // --- Premium Color Themes ---
 const THEMES = {
@@ -81,11 +83,22 @@ const THEMES = {
 // --- Password Hashing Helper ---
 const hashPassword = async (password) => {
   if (!password) return '';
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    // Fallback for non-HTTPS environments where crypto.subtle is unavailable
+    let hash = 0;
+    for (let i = 0; i < password.length; i++) {
+      const char = password.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16).padStart(8, '0');
+  }
 };
 
 const defaultWorkspaces = [
