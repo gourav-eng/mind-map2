@@ -387,7 +387,9 @@ export default function WorkflowApp() {
   const cloudSaveTimerRef = useRef(null);
   const lastSaveTimestampRef = useRef(0);
   const realtimeChannelRef = useRef(null);
-  const skipNextSaveRef = useRef(false);
+  const skipSaveCountRef = useRef(0);
+  const activeProjectIdRef = useRef(null);
+  const lastSyncedRef = useRef({ workspaces: null, activeTab: '', nextId: 0 });
 
   // --- Toast Notifications ---
   const [toasts, setToasts] = useState([]);
@@ -799,10 +801,8 @@ export default function WorkflowApp() {
     const channel = supabase
       .channel('mind-maps-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, (payload) => {
-        // Skip self-echoes: primary check via device ID
+        // Skip self-echoes: check via device ID
         if (payload.new && payload.new.data && payload.new.data._lastWriter === deviceId) return;
-        // Secondary fallback: skip changes within 2 seconds of our last save
-        if (Date.now() - lastSaveTimestampRef.current < 2000) return;
 
         const { eventType, new: newRow } = payload;
         if ((eventType === 'INSERT' || eventType === 'UPDATE') && newRow && newRow.data) {
@@ -835,13 +835,15 @@ export default function WorkflowApp() {
           });
 
           // If this is the active project on this device, update the rendered view
-          if (incomingProjectId === activeProjectId) {
+          if (incomingProjectId === activeProjectIdRef.current) {
             const incomingWorkspaces = (incomingData.workspaces || []).map(ws => {
               const grps = ws.groups || [];
               const nds = ws.nodes || [];
               return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
             });
             if (incomingWorkspaces.length > 0) {
+              skipSaveCountRef.current += 1;
+              lastSyncedRef.current = { workspaces: incomingWorkspaces, activeTab: incomingData.activeTab || lastSyncedRef.current.activeTab, nextId: incomingData.nextId || lastSyncedRef.current.nextId };
               setWorkspaces(incomingWorkspaces);
               if (incomingData.activeTab) setActiveTab(incomingData.activeTab);
               if (incomingData.nextId) setNextId(incomingData.nextId);
@@ -869,12 +871,12 @@ export default function WorkflowApp() {
         clearTimeout(cloudSaveTimerRef.current);
       }
     };
-  }, [initialized, activeProjectId]);
+  }, [initialized]);
 
   useEffect(() => {
     if (!initialized || !workspaces?.length || !activeProjectId) return;
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
+    if (skipSaveCountRef.current > 0) {
+      skipSaveCountRef.current -= 1;
       return;
     }
 
@@ -897,8 +899,20 @@ export default function WorkflowApp() {
     projectsRef.current = projects;
   }, [projects]);
 
+  // Keep activeProjectIdRef in sync with activeProjectId state
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
   useEffect(() => {
     if (initialized && activeProjectId) {
+      // Skip redundant updates if workspaces/activeTab/nextId haven't changed
+      if (lastSyncedRef.current.workspaces === workspaces &&
+          lastSyncedRef.current.activeTab === activeTab &&
+          lastSyncedRef.current.nextId === nextId) {
+        return;
+      }
+      lastSyncedRef.current = { workspaces, activeTab, nextId };
       setProjects(prev => {
         const updated = prev.map(p => p.id === activeProjectId 
           ? { ...p, workspaces, activeTab, nextId }
@@ -1420,7 +1434,7 @@ export default function WorkflowApp() {
   const handleLogoTap = () => {
     const now = Date.now();
     const ref = logoTapRef.current;
-    if (now - ref.lastTap < 1000) {
+    if (now - ref.lastTap < 600) {
       ref.count += 1;
     } else {
       ref.count = 1;
@@ -1430,6 +1444,40 @@ export default function WorkflowApp() {
       ref.count = 0;
       openProjectPanel();
     }
+  };
+
+  // Direct project switch helper - loads a target project into the UI without password check
+  const switchToProjectDirect = (targetProject) => {
+    let targetWorkspaces = targetProject.workspaces || defaultWorkspaces;
+    targetWorkspaces = targetWorkspaces.map(ws => {
+      const grps = ws.groups || [];
+      const nds = ws.nodes || [];
+      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+    });
+    const isDefault = projectsRef.current.indexOf(targetProject) === 0;
+    skipSaveCountRef.current += 1;
+    setActiveProjectId(targetProject.id);
+    setWorkspaces(targetWorkspaces);
+    setActiveTab(targetProject.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
+    setNextId(targetProject.nextId || 10);
+    if (isDefault) {
+      setStoredPassword('');
+      setPasswordEnabled(false);
+    } else {
+      setStoredPassword(targetProject.password || '');
+      setPasswordEnabled(!!targetProject.password);
+    }
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', targetProject.id);
+    setShowProjectPanel(false);
+    setProjectPasswordInput('');
+    setProjectError('');
+    setTransform({ x: 0, y: 0, scale: 1 });
+    // Reset history
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
   };
 
   const createProject = async () => {
@@ -1461,7 +1509,8 @@ export default function WorkflowApp() {
     saveToCloud(newProj.id, { name: newProj.name, password: newProj.password, workspaces: newProj.workspaces, activeTab: newProj.activeTab, nextId: newProj.nextId });
     addToast('Project created successfully', 'success');
     setProjectError('');
-    setProjectPanelMode('open');
+    // Auto-switch to the newly created project
+    switchToProjectDirect(newProj);
     setProjectNameInput('');
     setProjectDescInput('');
     setProjectPasswordInput('');
@@ -1485,32 +1534,8 @@ export default function WorkflowApp() {
       localStorage.setItem('nexus-app-state', JSON.stringify(updated));
       return updated;
     });
-    // Load target project
-    let targetWorkspaces = target.workspaces || defaultWorkspaces;
-    targetWorkspaces = targetWorkspaces.map(ws => {
-      const grps = ws.groups || [];
-      const nds = ws.nodes || [];
-      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
-    });
-    skipNextSaveRef.current = true;
-    setActiveProjectId(targetId);
-    setWorkspaces(targetWorkspaces);
-    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
-    setNextId(target.nextId || 10);
-    setStoredPassword(target.password || '');
-    setPasswordEnabled(!!target.password);
-    setIsAuthenticated(true);
-    localStorage.setItem('nexus-active-project', targetId);
-    setShowProjectPanel(false);
-    setProjectPasswordInput('');
-    setProjectError('');
-    setTransform({ x: 0, y: 0, scale: 1 });
+    switchToProjectDirect(target);
     addToast(`Switched to ${target.name}`, 'success');
-    // Reset history
-    pastRef.current = [];
-    futureRef.current = [];
-    setCanUndo(false);
-    setCanRedo(false);
   };
 
   // Passwordless project switch - used by boss key (Ctrl+Shift+/) and default project switch from panel
@@ -1527,39 +1552,8 @@ export default function WorkflowApp() {
       localStorage.setItem('nexus-app-state', JSON.stringify(updated));
       return updated;
     });
-    // Load target project
-    let targetWorkspaces = target.workspaces || defaultWorkspaces;
-    targetWorkspaces = targetWorkspaces.map(ws => {
-      const grps = ws.groups || [];
-      const nds = ws.nodes || [];
-      return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
-    });
-    const isDefault = projectsRef.current.indexOf(target) === 0;
-    skipNextSaveRef.current = true;
-    setActiveProjectId(targetId);
-    setWorkspaces(targetWorkspaces);
-    setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
-    setNextId(target.nextId || 10);
-    // Default project is always password-free
-    if (isDefault) {
-      setStoredPassword('');
-      setPasswordEnabled(false);
-    } else {
-      setStoredPassword(target.password || '');
-      setPasswordEnabled(!!target.password);
-    }
-    setIsAuthenticated(true);
-    localStorage.setItem('nexus-active-project', targetId);
-    setShowProjectPanel(false);
-    setProjectPasswordInput('');
-    setProjectError('');
-    setTransform({ x: 0, y: 0, scale: 1 });
+    switchToProjectDirect(target);
     addToast(`Switched to ${target.name}`, 'success');
-    // Reset history
-    pastRef.current = [];
-    futureRef.current = [];
-    setCanUndo(false);
-    setCanRedo(false);
   };
 
   const deleteProject = async (targetId) => {

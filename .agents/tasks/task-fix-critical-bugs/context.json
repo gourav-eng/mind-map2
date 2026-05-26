@@ -1,0 +1,20 @@
+{
+  "project_type": "React 18 SPA with Supabase realtime sync, deployed on Vercel",
+  "language": "JavaScript (JSX)",
+  "build_system": "Vite 6 with @vitejs/plugin-react, TailwindCSS via PostCSS",
+  "test_framework": "No tests - single-file app with no test infrastructure",
+  "build_command": "npm run build",
+  "test_command": "npm run build (no test suite exists)",
+  "verification_instructions": "1. Run 'npm run build' to verify no compilation errors. 2. Manually verify the logic changes are correct by reading the code.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "npm install && npm run build",
+  "environment_constraints": "No test framework. Validation is via successful Vite build (static analysis + JSX compilation). No Supabase credentials available in sandbox.",
+  "contribution_requirements": "Keep single-file architecture. Do not change Supabase table schema. Must work without Supabase (localStorage fallback).",
+  "key_patterns": "All app logic in src/App.jsx (~4500 lines). State management uses React useState/useRef hooks. Supabase realtime subscription in useEffect. Cloud sync via debounced upsert. Projects stored as array in state with each project having {id, name, password, workspaces, activeTab, nextId}. deviceId for self-echo suppression. skipNextSaveRef for preventing save loops during project switches.",
+  "relevant_files": [
+    "src/App.jsx",
+    "src/supabase.js",
+    "package.json"
+  ],
+  "directory_structure": "src/App.jsx (entire app), src/supabase.js (Supabase client), src/main.jsx (React entry), src/index.css (TailwindCSS), public/ (static assets)"
+}
