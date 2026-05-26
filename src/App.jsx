@@ -10,6 +10,9 @@ import {
 } from 'lucide-react';
 import supabase from './supabase'
 
+// --- Device ID for self-echo suppression in realtime sync ---
+const deviceId = crypto.randomUUID();
+
 // --- Premium Color Themes ---
 const THEMES = {
   amber: { 
@@ -371,11 +374,14 @@ export default function WorkflowApp() {
   const cloudSaveTimerRef = useRef(null);
   const lastSaveTimestampRef = useRef(0);
   const realtimeChannelRef = useRef(null);
+  const skipNextSaveRef = useRef(false);
 
   // --- Toast Notifications ---
   const [toasts, setToasts] = useState([]);
+  const toastTimersRef = useRef({});
   const addToast = useCallback((message, type = 'info') => {
-    setToasts(prev => [...prev, { id: Date.now(), message, type }]);
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
   }, []);
 
   // --- Keyboard Shortcuts Help ---
@@ -385,14 +391,24 @@ export default function WorkflowApp() {
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
   const nodeTapRef = useRef(null);
 
-  // --- Auto-dismiss toasts after 3 seconds ---
+  // --- Auto-dismiss toasts after 3 seconds (per-toast timers) ---
   useEffect(() => {
-    if (toasts.length === 0) return;
-    const timer = setTimeout(() => {
-      setToasts(prev => prev.slice(1));
-    }, 3000);
-    return () => clearTimeout(timer);
+    toasts.forEach(toast => {
+      if (!toastTimersRef.current[toast.id]) {
+        toastTimersRef.current[toast.id] = setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== toast.id));
+          delete toastTimersRef.current[toast.id];
+        }, 3000);
+      }
+    });
   }, [toasts]);
+
+  // Cleanup toast timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(toastTimersRef.current).forEach(timer => clearTimeout(timer));
+    };
+  }, []);
 
   // --- Coordinate Mapping Helpers ---
   const getWorkspaceCoords = useCallback((e) => {
@@ -511,7 +527,7 @@ export default function WorkflowApp() {
       .from('mind_maps')
       .upsert({
         id: projectId,
-        data: projectData,
+        data: { ...projectData, _lastWriter: deviceId },
         updated_at: new Date().toISOString(),
       });
 
@@ -763,7 +779,9 @@ export default function WorkflowApp() {
     const channel = supabase
       .channel('mind-maps-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, (payload) => {
-        // Skip self-echoes (changes we made within last 2 seconds)
+        // Skip self-echoes: primary check via device ID
+        if (payload.new && payload.new.data && payload.new.data._lastWriter === deviceId) return;
+        // Secondary fallback: skip changes within 2 seconds of our last save
         if (Date.now() - lastSaveTimestampRef.current < 2000) return;
 
         const { eventType, new: newRow } = payload;
@@ -835,6 +853,10 @@ export default function WorkflowApp() {
 
   useEffect(() => {
     if (!initialized || !workspaces?.length || !activeProjectId) return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
 
     const currentProject = projectsRef.current.find(p => p.id === activeProjectId);
     debouncedSaveToCloud(activeProjectId, {
@@ -1450,6 +1472,7 @@ export default function WorkflowApp() {
       const nds = ws.nodes || [];
       return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
     });
+    skipNextSaveRef.current = true;
     setActiveProjectId(targetId);
     setWorkspaces(targetWorkspaces);
     setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
@@ -1492,6 +1515,7 @@ export default function WorkflowApp() {
       return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
     });
     const isDefault = projectsRef.current.indexOf(target) === 0;
+    skipNextSaveRef.current = true;
     setActiveProjectId(targetId);
     setWorkspaces(targetWorkspaces);
     setActiveTab(target.activeTab || (targetWorkspaces.length > 0 ? targetWorkspaces[0].id : ''));
