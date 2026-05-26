@@ -388,6 +388,8 @@ export default function WorkflowApp() {
   const lastSaveTimestampRef = useRef(0);
   const realtimeChannelRef = useRef(null);
   const skipNextSaveRef = useRef(false);
+  const activeProjectIdRef = useRef(null);
+  const lastSyncedRef = useRef({ workspaces: null, activeTab: '', nextId: 0 });
 
   // --- Toast Notifications ---
   const [toasts, setToasts] = useState([]);
@@ -799,10 +801,8 @@ export default function WorkflowApp() {
     const channel = supabase
       .channel('mind-maps-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, (payload) => {
-        // Skip self-echoes: primary check via device ID
+        // Skip self-echoes: check via device ID
         if (payload.new && payload.new.data && payload.new.data._lastWriter === deviceId) return;
-        // Secondary fallback: skip changes within 2 seconds of our last save
-        if (Date.now() - lastSaveTimestampRef.current < 2000) return;
 
         const { eventType, new: newRow } = payload;
         if ((eventType === 'INSERT' || eventType === 'UPDATE') && newRow && newRow.data) {
@@ -835,13 +835,14 @@ export default function WorkflowApp() {
           });
 
           // If this is the active project on this device, update the rendered view
-          if (incomingProjectId === activeProjectId) {
+          if (incomingProjectId === activeProjectIdRef.current) {
             const incomingWorkspaces = (incomingData.workspaces || []).map(ws => {
               const grps = ws.groups || [];
               const nds = ws.nodes || [];
               return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
             });
             if (incomingWorkspaces.length > 0) {
+              skipNextSaveRef.current = true;
               setWorkspaces(incomingWorkspaces);
               if (incomingData.activeTab) setActiveTab(incomingData.activeTab);
               if (incomingData.nextId) setNextId(incomingData.nextId);
@@ -869,7 +870,7 @@ export default function WorkflowApp() {
         clearTimeout(cloudSaveTimerRef.current);
       }
     };
-  }, [initialized, activeProjectId]);
+  }, [initialized]);
 
   useEffect(() => {
     if (!initialized || !workspaces?.length || !activeProjectId) return;
@@ -897,8 +898,20 @@ export default function WorkflowApp() {
     projectsRef.current = projects;
   }, [projects]);
 
+  // Keep activeProjectIdRef in sync with activeProjectId state
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
   useEffect(() => {
     if (initialized && activeProjectId) {
+      // Skip redundant updates if workspaces/activeTab/nextId haven't changed
+      if (lastSyncedRef.current.workspaces === workspaces &&
+          lastSyncedRef.current.activeTab === activeTab &&
+          lastSyncedRef.current.nextId === nextId) {
+        return;
+      }
+      lastSyncedRef.current = { workspaces, activeTab, nextId };
       setProjects(prev => {
         const updated = prev.map(p => p.id === activeProjectId 
           ? { ...p, workspaces, activeTab, nextId }
@@ -1420,7 +1433,7 @@ export default function WorkflowApp() {
   const handleLogoTap = () => {
     const now = Date.now();
     const ref = logoTapRef.current;
-    if (now - ref.lastTap < 1000) {
+    if (now - ref.lastTap < 600) {
       ref.count += 1;
     } else {
       ref.count = 1;
@@ -1461,7 +1474,22 @@ export default function WorkflowApp() {
     saveToCloud(newProj.id, { name: newProj.name, password: newProj.password, workspaces: newProj.workspaces, activeTab: newProj.activeTab, nextId: newProj.nextId });
     addToast('Project created successfully', 'success');
     setProjectError('');
-    setProjectPanelMode('open');
+    // Auto-switch to the newly created project
+    skipNextSaveRef.current = true;
+    setActiveProjectId(newProj.id);
+    setWorkspaces(newProj.workspaces);
+    setActiveTab(newProj.activeTab);
+    setNextId(newProj.nextId);
+    setStoredPassword(newProj.password);
+    setPasswordEnabled(true);
+    setIsAuthenticated(true);
+    localStorage.setItem('nexus-active-project', newProj.id);
+    setTransform({ x: 0, y: 0, scale: 1 });
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setShowProjectPanel(false);
     setProjectNameInput('');
     setProjectDescInput('');
     setProjectPasswordInput('');
