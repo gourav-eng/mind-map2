@@ -8,6 +8,7 @@ import {
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2,
   Lock, Shield, Eye, EyeOff, GitBranch
 } from 'lucide-react';
+import supabase from './supabase'
 
 // --- Premium Color Themes ---
 const THEMES = {
@@ -471,131 +472,59 @@ export default function WorkflowApp() {
   }, []);
 
 
+  const saveToCloud = async (payload) => {
+    const { error } = await supabase
+      .from('mind_maps')
+      .upsert({
+        id: 'main',
+        data: payload,
+        updated_at: new Date().toISOString(),
+      })
+
+    if (error) {
+      console.error('Cloud save error:', error)
+    }
+  }
+
+  const loadFromCloud = async () => {
+    const { data, error } = await supabase
+      .from('mind_maps')
+      .select('*')
+      .eq('id', 'main')
+      .single()
+
+    if (data?.data) {
+      return data.data
+    }
+
+    if (error) {
+      console.log('No cloud data yet')
+    }
+
+    return null
+  }
+
   // --- Initialization & Auto-Save ---
   useEffect(() => {
     const init = async () => {
-      try {
-        // Check for new project system first
-        const savedAppState = localStorage.getItem('nexus-app-state');
-        const savedActiveProject = localStorage.getItem('nexus-active-project');
+      const cloudData = await loadFromCloud()
 
-        if (savedAppState) {
-          // Load from new project system
-          const parsedProjects = JSON.parse(savedAppState);
-          if (parsedProjects && Array.isArray(parsedProjects) && parsedProjects.length > 0) {
-            // Migrate any unhashed passwords (short strings that are not 64-char hex)
-            let needsSave = false;
-            const migratedProjects = await Promise.all(parsedProjects.map(async (p) => {
-              if (p.password && !/^[a-f0-9]{64}$/.test(p.password)) {
-                needsSave = true;
-                return { ...p, password: await hashPassword(p.password) };
-              }
-              return p;
-            }));
-            if (needsSave) {
-              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
-            }
-
-            setProjects(migratedProjects);
-            const activeId = savedActiveProject || migratedProjects[0].id;
-            setActiveProjectId(activeId);
-            const activeProj = migratedProjects.find(p => p.id === activeId) || migratedProjects[0];
-            
-            let initialWorkspaces = activeProj.workspaces || defaultWorkspaces;
-            initialWorkspaces = initialWorkspaces.map(ws => {
-              const grps = ws.groups || [];
-              const nds = ws.nodes || [];
-              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
-            });
-            
-            setWorkspaces(initialWorkspaces);
-            setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
-            setNextId(activeProj.nextId || 10);
-            
-            // Default (first) project is always password-free
-            const isDefaultProject = activeProj.id === migratedProjects[0].id;
-            if (!isDefaultProject && activeProj.password) {
-              setPasswordEnabled(true);
-              setStoredPassword(activeProj.password);
-            }
-            // Strip password from default project in storage if present
-            if (migratedProjects[0].password) {
-              migratedProjects[0] = { ...migratedProjects[0], password: '' };
-              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
-            }
-          }
-        } else {
-          // Migration from old localStorage keys
-          const savedWs = localStorage.getItem('premium-workspaces');
-          const savedTab = localStorage.getItem('premium-active-tab');
-          const savedCounter = localStorage.getItem('premium-counter');
-          const savedPasswordEnabled = localStorage.getItem('nexus-password-enabled');
-          const savedPassword = localStorage.getItem('nexus-password');
-
-          let initialWorkspaces = defaultWorkspaces;
-          let initialTab = 'ws-1';
-          let initialNextId = 10;
-
-          if (savedWs) {
-            const parsedWs = JSON.parse(savedWs);
-            if (parsedWs && Array.isArray(parsedWs)) {
-              initialWorkspaces = parsedWs.map(ws => {
-                const grps = ws.groups || [];
-                const nds = ws.nodes || [];
-                return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
-              });
-            }
-          }
-          
-          if (savedTab) initialTab = savedTab;
-          else if (initialWorkspaces.length > 0) initialTab = initialWorkspaces[0].id;
-          
-          if (savedCounter) initialNextId = parseInt(savedCounter, 10) || 10;
-
-          // Build default project from migrated data - default project is always password-free
-          const defaultProject = {
-            id: 'proj-default',
-            name: 'Default',
-            password: '',
-            workspaces: initialWorkspaces,
-            activeTab: initialTab,
-            nextId: initialNextId
-          };
-
-          setProjects([defaultProject]);
-          setActiveProjectId('proj-default');
-          setWorkspaces(initialWorkspaces);
-          setActiveTab(initialTab);
-          setNextId(initialNextId);
-
-          // Save to new format and clean up old keys
-          localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
-          localStorage.setItem('nexus-active-project', 'proj-default');
-          localStorage.removeItem('premium-workspaces');
-          localStorage.removeItem('premium-active-tab');
-          localStorage.removeItem('premium-counter');
-          localStorage.removeItem('nexus-password-enabled');
-          localStorage.removeItem('nexus-password');
-        }
-      } catch (e) {
-        const defaultProject = {
-          id: 'proj-default',
-          name: 'Default',
-          password: '',
-          workspaces: defaultWorkspaces,
-          activeTab: 'ws-1',
-          nextId: 10
-        };
-      setProjects([defaultProject]);
-      setActiveProjectId('proj-default');
-      setWorkspaces(defaultWorkspaces);
-      setActiveTab('ws-1');
-      setNextId(10);
+      if (cloudData) {
+        setWorkspaces(cloudData.workspaces || [])
       }
+
       setInitialized(true);
     };
     init();
   }, []);
+
+  useEffect(() => {
+    if (!workspaces?.length) return
+
+    saveToCloud({
+      workspaces,
+    })
+  }, [workspaces])
 
   useEffect(() => {
     stateRef.current = { workspaces, activeTab, nextId };
