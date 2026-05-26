@@ -843,6 +843,7 @@ export default function WorkflowApp() {
             });
             if (incomingWorkspaces.length > 0) {
               skipSaveCountRef.current += 1;
+              lastSyncedRef.current = { workspaces: incomingWorkspaces, activeTab: incomingData.activeTab || lastSyncedRef.current.activeTab, nextId: incomingData.nextId || lastSyncedRef.current.nextId };
               setWorkspaces(incomingWorkspaces);
               if (incomingData.activeTab) setActiveTab(incomingData.activeTab);
               if (incomingData.nextId) setNextId(incomingData.nextId);
