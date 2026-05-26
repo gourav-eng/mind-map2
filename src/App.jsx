@@ -372,9 +372,27 @@ export default function WorkflowApp() {
   const lastSaveTimestampRef = useRef(0);
   const realtimeChannelRef = useRef(null);
 
+  // --- Toast Notifications ---
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((message, type = 'info') => {
+    setToasts(prev => [...prev, { id: Date.now(), message, type }]);
+  }, []);
+
+  // --- Keyboard Shortcuts Help ---
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
   const nodeTapRef = useRef(null);
+
+  // --- Auto-dismiss toasts after 3 seconds ---
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timer = setTimeout(() => {
+      setToasts(prev => prev.slice(1));
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
 
   // --- Coordinate Mapping Helpers ---
   const getWorkspaceCoords = useCallback((e) => {
@@ -499,9 +517,10 @@ export default function WorkflowApp() {
 
     if (error) {
       console.error('Cloud save error:', error);
+      addToast('Failed to sync to cloud', 'error');
     }
     setSyncStatus(prev => prev === 'syncing' ? 'connected' : prev);
-  }, []);
+  }, [addToast]);
 
   const debouncedSaveToCloud = useCallback((projectId, projectData) => {
     if (!supabase) return;
@@ -520,6 +539,7 @@ export default function WorkflowApp() {
 
     if (error) {
       console.log('Cloud load error:', error);
+      addToast('Cloud sync unavailable, using local data', 'info');
       return null;
     }
 
@@ -642,6 +662,7 @@ export default function WorkflowApp() {
         }
       } catch (e) {
         console.log('Cloud load failed, falling back to localStorage:', e);
+        addToast('Cloud sync unavailable, using local data', 'info');
       }
 
       // Fallback to localStorage
@@ -787,6 +808,7 @@ export default function WorkflowApp() {
               if (incomingData.activeTab) setActiveTab(incomingData.activeTab);
               if (incomingData.nextId) setNextId(incomingData.nextId);
             }
+            addToast('Synced from another device', 'info');
           }
         }
       })
@@ -913,19 +935,28 @@ export default function WorkflowApp() {
           }
         }
       }
+      // Ctrl+Shift+H - keyboard shortcuts help overlay
+      if (e.ctrlKey && e.shiftKey && e.key === 'H') {
+        e.preventDefault();
+        setShowShortcutsHelp(prev => !prev);
+      }
       if (e.key === 'Escape' && showProjectPanel) {
         setShowProjectPanel(false);
+      }
+      if (e.key === 'Escape' && showShortcutsHelp) {
+        setShowShortcutsHelp(false);
       }
     };
     window.addEventListener('keydown', handleSecretKey);
     return () => window.removeEventListener('keydown', handleSecretKey);
-  }, [showProjectPanel, activeProjectId]);
+  }, [showProjectPanel, showShortcutsHelp, activeProjectId]);
 
   // --- Auto-hide sidebar on small screens ---
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 768) {
         setShowSidebar(false);
+        setViewMode('outline');
       }
     };
     handleResize();
@@ -1386,6 +1417,7 @@ export default function WorkflowApp() {
     });
     // Immediately save new project to cloud so other devices can see it
     saveToCloud(newProj.id, { name: newProj.name, password: newProj.password, workspaces: newProj.workspaces, activeTab: newProj.activeTab, nextId: newProj.nextId });
+    addToast('Project created successfully', 'success');
     setProjectError('');
     setProjectPanelMode('open');
     setProjectNameInput('');
@@ -1430,6 +1462,7 @@ export default function WorkflowApp() {
     setProjectPasswordInput('');
     setProjectError('');
     setTransform({ x: 0, y: 0, scale: 1 });
+    addToast(`Switched to ${target.name}`, 'success');
     // Reset history
     pastRef.current = [];
     futureRef.current = [];
@@ -1477,6 +1510,7 @@ export default function WorkflowApp() {
     setProjectPasswordInput('');
     setProjectError('');
     setTransform({ x: 0, y: 0, scale: 1 });
+    addToast(`Switched to ${target.name}`, 'success');
     // Reset history
     pastRef.current = [];
     futureRef.current = [];
@@ -1586,6 +1620,7 @@ export default function WorkflowApp() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    addToast('All projects exported', 'success');
   };
 
   const handleImport = (e) => {
@@ -1625,6 +1660,7 @@ export default function WorkflowApp() {
           importedProjects.forEach(p => {
             saveToCloud(p.id, { name: p.name, password: p.password, workspaces: p.workspaces, activeTab: p.activeTab, nextId: p.nextId });
           });
+          addToast('Projects imported successfully', 'success');
         } else if (importedData.workspaces && Array.isArray(importedData.workspaces)) {
           // Legacy single-workspace format - import into active project
           takeSnapshot();
@@ -1636,11 +1672,14 @@ export default function WorkflowApp() {
           setWorkspaces(importedWorkspaces);
           setActiveTab(importedData.activeTab || importedWorkspaces[0]?.id || '');
           setNextId(importedData.nextId || 10);
+          addToast('Projects imported successfully', 'success');
         } else {
           setErrorMessage("Invalid workflow file format.");
+          addToast('Failed to import: invalid file format', 'error');
         }
       } catch (err) {
         setErrorMessage("Failed to read file.");
+        addToast('Failed to import: invalid file format', 'error');
       }
     };
     reader.readAsText(file);
@@ -2613,7 +2652,15 @@ export default function WorkflowApp() {
 
   const stats = getTaskStats();
 
-  if (!initialized || !activeWs) return null;
+  if (!initialized || !activeWs) return (
+    <div className="flex items-center justify-center h-screen w-screen bg-[#1e1e2e]">
+      <div className="flex flex-col items-center gap-4 animate-fade-in">
+        <h1 className="text-2xl font-bold text-white tracking-tight">Nexus Workflow</h1>
+        <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-400">Loading workspace...</p>
+      </div>
+    </div>
+  );
 
 
   // --- Outline Board Content ---
@@ -2768,9 +2815,11 @@ export default function WorkflowApp() {
           setImportPreview({ type: 'legacy', count: importedData.workspaces.length, names: ['Current workspace (legacy format)'], data: importedData });
         } else {
           setProjectError('Invalid file format.');
+          addToast('Failed to import: invalid file format', 'error');
         }
       } catch (err) {
         setProjectError('Failed to read file.');
+        addToast('Failed to import: invalid file format', 'error');
       }
     };
     reader.readAsText(file);
@@ -2820,6 +2869,7 @@ export default function WorkflowApp() {
     }
     setImportPreview(null);
     setShowProjectPanel(false);
+    addToast('Projects imported successfully', 'success');
   };
 
   const renderProjectPanel = (isGate = false) => {
@@ -2839,9 +2889,9 @@ export default function WorkflowApp() {
       <>
         <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-md transition-opacity duration-200`} onClick={() => !isGate && setShowProjectPanel(false)} />
         <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 pointer-events-auto flex overflow-hidden transition-all duration-200" style={{ minHeight: '420px', maxHeight: '80vh' }} onKeyDown={(e) => { if (e.key === 'Escape' && !isGate) setShowProjectPanel(false); }}>
-            {/* Left Sidebar */}
-            <div className="w-48 bg-slate-50 border-r border-slate-200 flex flex-col py-4 shrink-0">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 pointer-events-auto flex flex-col md:flex-row overflow-hidden animate-scale-in transition-all duration-200 fixed inset-0 rounded-none md:relative md:inset-auto md:rounded-2xl md:max-w-2xl" style={{ minHeight: '420px', maxHeight: '80vh' }} onKeyDown={(e) => { if (e.key === 'Escape' && !isGate) setShowProjectPanel(false); }}>
+            {/* Left Sidebar - horizontal tab bar on mobile */}
+            <div className="hidden md:flex w-48 bg-slate-50 border-r border-slate-200 flex-col py-4 shrink-0">
               <div className="px-4 mb-4">
                 <h2 className="text-sm font-bold text-slate-800 tracking-tight">Projects</h2>
               </div>
@@ -2853,6 +2903,15 @@ export default function WorkflowApp() {
                   </button>
                 ))}
               </nav>
+            </div>
+            {/* Mobile Tab Bar */}
+            <div className="flex md:hidden w-full border-b border-slate-200 bg-slate-50 px-2 py-2 gap-1 overflow-x-auto shrink-0">
+              {tabs.map(tab => (
+                <button key={tab.id} onClick={() => { setProjectPanelMode(tab.id); setProjectError(''); setSelectedProjectId(null); setDeleteConfirm(false); }} className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg whitespace-nowrap transition-all duration-150 ${effectiveMode === tab.id ? 'bg-indigo-50 text-indigo-700 shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>
+                  <tab.icon className="w-3.5 h-3.5 shrink-0" />
+                  <span>{tab.label}</span>
+                </button>
+              ))}
             </div>
             {/* Right Content */}
             <div className="flex-1 flex flex-col min-w-0">
@@ -3180,7 +3239,7 @@ export default function WorkflowApp() {
 
         {/* --- Left Sidebar --- */}
         {showSidebar && (
-          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
+          <aside className="w-[calc(100vw-3rem)] max-w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 animate-in slide-in-from-left duration-200 transition-all duration-300 fixed md:relative inset-y-0 left-0 top-14 sm:top-16 md:top-0 shadow-xl md:shadow-none overflow-y-auto">
             <div className="p-4 border-b border-slate-100">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -3598,7 +3657,7 @@ export default function WorkflowApp() {
               return (
                 <div
                   key={node.id}
-                  className={`absolute rounded-xl border w-[${NODE_WIDTH}px] flex flex-col pointer-events-auto bg-white/95 backdrop-blur-sm ${theme.wrapper} ${
+                  className={`absolute rounded-xl border w-[${NODE_WIDTH}px] flex flex-col pointer-events-auto bg-white/95 backdrop-blur-sm animate-scale-in ${theme.wrapper} ${
                     isDragging ? 'shadow-2xl scale-[1.03] ring-2 ring-indigo-500' : 'transition-all duration-150 shadow-md'
                   } ${dragOverNodeId === node.id ? 'ring-4 ring-indigo-400 ring-opacity-50 scale-[1.02]' : ''} ${
                     isFocused ? 'ring-4 ring-indigo-500 animate-[pulse_1.5s_infinite]' : ''
@@ -3844,6 +3903,15 @@ export default function WorkflowApp() {
             })}
           </div>
 
+
+          {/* --- Mobile FAB (Add Node) --- */}
+          <button
+            onClick={() => addNode(window.innerWidth / 2, window.innerHeight / 2)}
+            className="md:hidden absolute bottom-20 right-4 z-50 w-12 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center transition-colors active:scale-95"
+            title="Add Node"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
 
           {/* --- Bottom-Right Floating Zoom and Guides --- */}
           <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 flex items-center gap-2 sm:gap-3 z-50">
@@ -4333,6 +4401,55 @@ export default function WorkflowApp() {
 
       {/* --- Secret Project Panel --- */}
       {showProjectPanel && renderProjectPanel(false)}
+
+      {/* --- Keyboard Shortcuts Help Overlay --- */}
+      {showShortcutsHelp && (
+        <>
+          <div className="fixed inset-0 z-[9990] bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowShortcutsHelp(false)} />
+          <div className="fixed inset-0 z-[9991] flex items-center justify-center pointer-events-none">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 pointer-events-auto animate-scale-in">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                <h3 className="text-base font-semibold text-slate-800">Keyboard Shortcuts</h3>
+                <button onClick={() => setShowShortcutsHelp(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="px-5 py-4 space-y-2">
+                {[
+                  ['Ctrl+Z', 'Undo'],
+                  ['Ctrl+Y', 'Redo'],
+                  ['Ctrl+C', 'Copy node/group'],
+                  ['Ctrl+X', 'Cut node/group'],
+                  ['Ctrl+V', 'Paste'],
+                  ['Ctrl+Shift+K', 'Project Manager'],
+                  ['Ctrl+Shift+/', 'Quick switch to default project'],
+                  ['Ctrl+Shift+H', 'Show this help'],
+                  ['Escape', 'Close panels'],
+                ].map(([shortcut, desc]) => (
+                  <div key={shortcut} className="flex items-center justify-between py-1.5">
+                    <kbd className="px-2 py-1 bg-slate-100 border border-slate-200 rounded text-xs font-mono text-slate-700">{shortcut}</kbd>
+                    <span className="text-sm text-slate-600">{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* --- Toast Notifications --- */}
+      <div className="fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 pointer-events-none">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto bg-white rounded-lg shadow-lg border-l-4 px-4 py-3 text-sm animate-fade-in-up ${
+              toast.type === 'success' ? 'border-l-emerald-500' :
+              toast.type === 'error' ? 'border-l-red-500' :
+              'border-l-blue-500'
+            }`}
+          >
+            <span className="text-slate-700">{toast.message}</span>
+          </div>
+        ))}
+      </div>
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes dash { to { stroke-dashoffset: -14; } }
