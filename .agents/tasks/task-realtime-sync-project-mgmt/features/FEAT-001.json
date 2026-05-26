@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Implement Supabase Realtime multi-device sync with per-device independent project selection, fix project switching bugs, and restructure cloud save to be project-aware. Currently the app saves all workspaces to a single Supabase row (id='main') with no realtime subscriptions. This feature adds: (1) project-aware cloud save so each project gets its own row in the mind_maps table, (2) Supabase Realtime subscriptions (postgres_changes) so all connected devices get live updates, (3) per-device active project stored in localStorage so each device/tab can independently view a different project while receiving real-time updates for its active project, (4) fix the project creation/switching bugs where projects create but UI doesn't update properly.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Restructure Cloud Save: In src/App.jsx, modify `saveToCloud` to save each project to its own row in the `mind_maps` table using the project ID as the row id (instead of hardcoded 'main'). Modify `loadFromCloud` to load all rows from the mind_maps table and reconstruct the projects array. The data stored per row should be: { id: projectId, data: { name, password, workspaces, activeTab, nextId }, updated_at }.",
     "Step 2 - Add Supabase Realtime Subscription: In src/App.jsx, after initialization, subscribe to the `mind_maps` table using `supabase.channel('mind-maps-sync').on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, payload => { ... }).subscribe()`. When an INSERT/UPDATE event arrives for the active project's row, merge the incoming data into state (but only if the change was made by another device - use a `lastSaveRef` timestamp to skip self-echoes). When the active project changes, re-subscribe to filter for just that project's row.",
@@ -29,5 +29,5 @@
     "Run `npm run build` and confirm it succeeds with no errors"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All changes implemented in src/App.jsx. Build passes successfully with npm run build. Key implementation notes: (1) useCallback used for saveToCloud and debouncedSaveToCloud to maintain stable references, (2) Realtime subscription uses activeProjectId in the dependency array so it re-subscribes when the active project changes, (3) Self-echo prevention uses a 2-second window via lastSaveTimestampRef, (4) Legacy 'main' row migration is handled transparently on load, (5) deleteProject now also removes the row from the cloud, (6) Connection status indicator is positioned in the top-right of the canvas with conditional rendering only when supabase client exists."
 }
