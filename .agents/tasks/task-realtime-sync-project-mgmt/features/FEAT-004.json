@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "fix",
   "description": "Address review issues: (1) Replace 2-second timestamp heuristic with device-specific ID for self-echo suppression, (2) Guard cloud save effect against unnecessary saves on project switch, (3) Fix toast timing by using per-toast timers instead of shared timer.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1 - Device ID self-echo suppression: Generate a unique deviceId using crypto.randomUUID() at module level. Include this deviceId in the saved payload as _lastWriter. In the realtime handler, check if payload.new.data._lastWriter === deviceId to skip self-echoes. Keep timestamp check as secondary fallback.",
     "Step 2 - Cloud save guard on project switch: Add a skipNextSaveRef boolean that gets set to true in switchProject and cycleToProject, and checked/reset in the cloud save useEffect.",
@@ -19,5 +19,5 @@
     "Run `npm run build` and confirm it succeeds with no errors"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All three review issues addressed in src/App.jsx. Build passes. (1) deviceId generated via crypto.randomUUID() at module level, included as _lastWriter in cloud save payload, checked first in realtime handler before timestamp fallback. (2) skipNextSaveRef added and set to true in both switchProject and cycleToProject, checked and reset in the cloud save useEffect. (3) Toast timers are now per-toast using a ref map of toast ID to setTimeout handle, with cleanup on unmount. Toast IDs now use Date.now() + Math.random() to avoid collisions."
 }
