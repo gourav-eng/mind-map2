@@ -473,6 +473,8 @@ export default function WorkflowApp() {
 
 
   const saveToCloud = async (payload) => {
+    if (!supabase) return
+
     const { error } = await supabase
       .from('mind_maps')
       .upsert({
@@ -487,6 +489,8 @@ export default function WorkflowApp() {
   }
 
   const loadFromCloud = async () => {
+    if (!supabase) return null
+
     const { data, error } = await supabase
       .from('mind_maps')
       .select('*')
