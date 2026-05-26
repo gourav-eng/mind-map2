@@ -404,6 +404,13 @@ export default function WorkflowApp() {
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
   const nodeTapRef = useRef(null);
 
+  // --- Signal successful mount to recovery screen ---
+  useEffect(() => {
+    window.__appLoaded = true;
+    const recovery = document.getElementById('recovery-screen');
+    if (recovery) recovery.style.display = 'none';
+  }, []);
+
   // --- Auto-dismiss toasts after 3 seconds (per-toast timers) ---
   useEffect(() => {
     toasts.forEach(toast => {
