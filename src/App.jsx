@@ -362,6 +362,12 @@ export default function WorkflowApp() {
   const saveTimerRef = useRef(null);
   const projectsRef = useRef([]);
 
+  // --- Realtime Sync State ---
+  const [syncStatus, setSyncStatus] = useState('disconnected'); // 'connected' | 'disconnected' | 'syncing'
+  const cloudSaveTimerRef = useRef(null);
+  const lastSaveTimestampRef = useRef(0);
+  const realtimeChannelRef = useRef(null);
+
   // --- Touch Gesture Refs (Pinch-to-Zoom) ---
   const touchRef = useRef({ isPinching: false, lastDist: 0, lastMidX: 0, lastMidY: 0 });
   const nodeTapRef = useRef(null);
@@ -472,59 +478,163 @@ export default function WorkflowApp() {
   }, []);
 
 
-  const saveToCloud = async (payload) => {
-    if (!supabase) return
+  const saveToCloud = useCallback(async (projectId, projectData) => {
+    if (!supabase) return;
+    if (!projectId || !projectData) return;
+
+    setSyncStatus('syncing');
+    lastSaveTimestampRef.current = Date.now();
 
     const { error } = await supabase
       .from('mind_maps')
       .upsert({
-        id: 'main',
-        data: payload,
+        id: projectId,
+        data: projectData,
         updated_at: new Date().toISOString(),
-      })
+      });
 
     if (error) {
-      console.error('Cloud save error:', error)
+      console.error('Cloud save error:', error);
     }
-  }
+    setSyncStatus(prev => prev === 'syncing' ? 'connected' : prev);
+  }, []);
+
+  const debouncedSaveToCloud = useCallback((projectId, projectData) => {
+    if (!supabase) return;
+    if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+    cloudSaveTimerRef.current = setTimeout(() => {
+      saveToCloud(projectId, projectData);
+    }, 1000);
+  }, [saveToCloud]);
 
   const loadFromCloud = async () => {
-    if (!supabase) return null
+    if (!supabase) return null;
 
     const { data, error } = await supabase
       .from('mind_maps')
-      .select('*')
-      .eq('id', 'main')
-      .single()
-
-    if (data?.data) {
-      return data.data
-    }
+      .select('*');
 
     if (error) {
-      console.log('No cloud data yet')
+      console.log('Cloud load error:', error);
+      return null;
     }
 
-    return null
-  }
+    if (data && data.length > 0) {
+      // Reconstruct projects array from individual rows
+      const cloudProjects = data
+        .filter(row => row.data && row.id !== 'main')
+        .map(row => ({
+          id: row.id,
+          name: row.data.name || 'Untitled',
+          password: row.data.password || '',
+          workspaces: row.data.workspaces || [],
+          activeTab: row.data.activeTab || '',
+          nextId: row.data.nextId || 10,
+        }));
+
+      // Also handle legacy 'main' row if it exists
+      const legacyRow = data.find(row => row.id === 'main');
+      if (legacyRow && legacyRow.data && legacyRow.data.workspaces && cloudProjects.length === 0) {
+        // Migration: convert legacy single-row format to a project
+        return {
+          legacy: true,
+          workspaces: legacyRow.data.workspaces,
+        };
+      }
+
+      if (cloudProjects.length > 0) {
+        return { legacy: false, projects: cloudProjects };
+      }
+    }
+
+    return null;
+  };
 
   // --- Initialization & Auto-Save ---
   useEffect(() => {
     const init = async () => {
       try {
         // Try cloud first
-        const cloudData = await loadFromCloud()
+        const cloudData = await loadFromCloud();
 
-        if (cloudData && cloudData.workspaces && cloudData.workspaces.length > 0) {
-          let initialWorkspaces = cloudData.workspaces.map(ws => {
-            const grps = ws.groups || [];
-            const nds = ws.nodes || [];
-            return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
-          });
-          setWorkspaces(initialWorkspaces);
-          setActiveTab(initialWorkspaces[0]?.id || '');
-          setInitialized(true);
-          return;
+        if (cloudData) {
+          if (cloudData.legacy) {
+            // Legacy single-row format - treat as single project
+            let initialWorkspaces = cloudData.workspaces.map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            });
+            const defaultProject = {
+              id: 'proj-default',
+              name: 'Default',
+              password: '',
+              workspaces: initialWorkspaces,
+              activeTab: initialWorkspaces[0]?.id || '',
+              nextId: 10
+            };
+            setProjects([defaultProject]);
+            setActiveProjectId('proj-default');
+            setWorkspaces(initialWorkspaces);
+            setActiveTab(initialWorkspaces[0]?.id || '');
+            setNextId(10);
+            localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
+            localStorage.setItem('nexus-active-project', 'proj-default');
+            // Migrate to new format in cloud
+            saveToCloud('proj-default', { name: 'Default', password: '', workspaces: initialWorkspaces, activeTab: initialWorkspaces[0]?.id || '', nextId: 10 });
+            setInitialized(true);
+            return;
+          } else if (cloudData.projects && cloudData.projects.length > 0) {
+            // New multi-row format
+            let cloudProjects = cloudData.projects.map(p => ({
+              ...p,
+              workspaces: (p.workspaces || []).map(ws => {
+                const grps = ws.groups || [];
+                const nds = ws.nodes || [];
+                return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+              })
+            }));
+
+            // Merge with any localStorage projects not in cloud (offline creation)
+            try {
+              const savedAppState = localStorage.getItem('nexus-app-state');
+              if (savedAppState) {
+                const localProjects = JSON.parse(savedAppState);
+                if (Array.isArray(localProjects)) {
+                  localProjects.forEach(lp => {
+                    if (!cloudProjects.find(cp => cp.id === lp.id)) {
+                      cloudProjects.push(lp);
+                      // Save offline-created project to cloud
+                      saveToCloud(lp.id, { name: lp.name, password: lp.password, workspaces: lp.workspaces, activeTab: lp.activeTab, nextId: lp.nextId });
+                    }
+                  });
+                }
+              }
+            } catch (e) {
+              // Ignore localStorage merge errors
+            }
+
+            setProjects(cloudProjects);
+            const savedActiveProject = localStorage.getItem('nexus-active-project');
+            const activeId = (savedActiveProject && cloudProjects.find(p => p.id === savedActiveProject)) ? savedActiveProject : cloudProjects[0].id;
+            setActiveProjectId(activeId);
+            const activeProj = cloudProjects.find(p => p.id === activeId) || cloudProjects[0];
+            
+            let initialWorkspaces = activeProj.workspaces || defaultWorkspaces;
+            setWorkspaces(initialWorkspaces);
+            setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
+            setNextId(activeProj.nextId || 10);
+            
+            if (activeProj.password) {
+              setPasswordEnabled(true);
+              setStoredPassword(activeProj.password);
+            }
+
+            localStorage.setItem('nexus-app-state', JSON.stringify(cloudProjects));
+            localStorage.setItem('nexus-active-project', activeId);
+            setInitialized(true);
+            return;
+          }
         }
       } catch (e) {
         console.log('Cloud load failed, falling back to localStorage:', e);
@@ -575,6 +685,11 @@ export default function WorkflowApp() {
               migratedProjects[0] = { ...migratedProjects[0], password: '' };
               localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
             }
+
+            // Save all projects to cloud on first load from localStorage
+            migratedProjects.forEach(p => {
+              saveToCloud(p.id, { name: p.name, password: p.password, workspaces: p.workspaces, activeTab: p.activeTab, nextId: p.nextId });
+            });
           }
         } else {
           // No saved state at all - use defaults
@@ -593,6 +708,7 @@ export default function WorkflowApp() {
           setNextId(10);
           localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
           localStorage.setItem('nexus-active-project', 'proj-default');
+          saveToCloud('proj-default', { name: 'Default', password: '', workspaces: defaultWorkspaces, activeTab: 'ws-1', nextId: 10 });
         }
       } catch (e) {
         // Complete fallback to defaults
@@ -615,13 +731,94 @@ export default function WorkflowApp() {
     init();
   }, []);
 
+  // --- Supabase Realtime Subscription ---
   useEffect(() => {
-    if (!workspaces?.length) return
+    if (!supabase || !initialized) return;
 
-    saveToCloud({
+    const channel = supabase
+      .channel('mind-maps-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mind_maps' }, (payload) => {
+        // Skip self-echoes (changes we made within last 2 seconds)
+        if (Date.now() - lastSaveTimestampRef.current < 2000) return;
+
+        const { eventType, new: newRow } = payload;
+        if ((eventType === 'INSERT' || eventType === 'UPDATE') && newRow && newRow.data) {
+          const incomingProjectId = newRow.id;
+          const incomingData = newRow.data;
+
+          // Update the projects array in memory
+          setProjects(prev => {
+            const exists = prev.find(p => p.id === incomingProjectId);
+            if (exists) {
+              return prev.map(p => p.id === incomingProjectId ? {
+                ...p,
+                name: incomingData.name || p.name,
+                password: incomingData.password || p.password,
+                workspaces: incomingData.workspaces || p.workspaces,
+                activeTab: incomingData.activeTab || p.activeTab,
+                nextId: incomingData.nextId || p.nextId,
+              } : p);
+            } else {
+              // New project from another device
+              return [...prev, {
+                id: incomingProjectId,
+                name: incomingData.name || 'Untitled',
+                password: incomingData.password || '',
+                workspaces: incomingData.workspaces || [],
+                activeTab: incomingData.activeTab || '',
+                nextId: incomingData.nextId || 10,
+              }];
+            }
+          });
+
+          // If this is the active project on this device, update the rendered view
+          if (incomingProjectId === activeProjectId) {
+            const incomingWorkspaces = (incomingData.workspaces || []).map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            });
+            if (incomingWorkspaces.length > 0) {
+              setWorkspaces(incomingWorkspaces);
+              if (incomingData.activeTab) setActiveTab(incomingData.activeTab);
+              if (incomingData.nextId) setNextId(incomingData.nextId);
+            }
+          }
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSyncStatus('connected');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setSyncStatus('disconnected');
+        }
+      });
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      if (cloudSaveTimerRef.current) {
+        clearTimeout(cloudSaveTimerRef.current);
+      }
+    };
+  }, [initialized, activeProjectId]);
+
+  useEffect(() => {
+    if (!initialized || !workspaces?.length || !activeProjectId) return;
+
+    const currentProject = projectsRef.current.find(p => p.id === activeProjectId);
+    debouncedSaveToCloud(activeProjectId, {
+      name: currentProject?.name || 'Untitled',
+      password: currentProject?.password || '',
       workspaces,
-    })
-  }, [workspaces])
+      activeTab,
+      nextId,
+    });
+  }, [workspaces, activeTab, nextId, initialized, activeProjectId, debouncedSaveToCloud]);
 
   useEffect(() => {
     stateRef.current = { workspaces, activeTab, nextId };
@@ -1175,6 +1372,8 @@ export default function WorkflowApp() {
       localStorage.setItem('nexus-app-state', JSON.stringify(updated));
       return updated;
     });
+    // Immediately save new project to cloud so other devices can see it
+    saveToCloud(newProj.id, { name: newProj.name, password: newProj.password, workspaces: newProj.workspaces, activeTab: newProj.activeTab, nextId: newProj.nextId });
     setProjectError('');
     setProjectPanelMode('main');
     setProjectNameInput('');
@@ -1286,6 +1485,12 @@ export default function WorkflowApp() {
     const updated = projects.filter(p => p.id !== targetId);
     setProjects(updated);
     localStorage.setItem('nexus-app-state', JSON.stringify(updated));
+    // Delete from cloud
+    if (supabase) {
+      supabase.from('mind_maps').delete().eq('id', targetId).then(({ error }) => {
+        if (error) console.error('Cloud delete error:', error);
+      });
+    }
     // If deleting active project, switch to first available
     if (targetId === activeProjectId) {
       const next = updated[0];
@@ -1349,8 +1554,16 @@ export default function WorkflowApp() {
 
   // --- Import / Export ---
   const exportData = () => {
-    const data = { workspaces, activeTab, nextId };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    // Export ALL projects with complete data
+    const exportPayload = {
+      version: 2,
+      projects: projects.map(p => p.id === activeProjectId
+        ? { ...p, workspaces, activeTab, nextId }
+        : p
+      ),
+      exportedAt: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1369,10 +1582,45 @@ export default function WorkflowApp() {
     reader.onload = (event) => {
       try {
         const importedData = JSON.parse(event.target.result);
-        if (importedData.workspaces && Array.isArray(importedData.workspaces)) {
+
+        if (importedData.version === 2 && importedData.projects && Array.isArray(importedData.projects)) {
+          // Multi-project format (version 2)
           takeSnapshot();
-          setWorkspaces(importedData.workspaces);
-          setActiveTab(importedData.activeTab || importedData.workspaces[0]?.id || '');
+          const importedProjects = importedData.projects.map(p => ({
+            ...p,
+            workspaces: (p.workspaces || []).map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            })
+          }));
+          setProjects(importedProjects);
+          const newActiveId = importedProjects[0]?.id || '';
+          setActiveProjectId(newActiveId);
+          const activeProj = importedProjects[0];
+          if (activeProj) {
+            setWorkspaces(activeProj.workspaces || defaultWorkspaces);
+            setActiveTab(activeProj.activeTab || (activeProj.workspaces?.[0]?.id || ''));
+            setNextId(activeProj.nextId || 10);
+            setStoredPassword(activeProj.password || '');
+            setPasswordEnabled(!!activeProj.password);
+          }
+          localStorage.setItem('nexus-app-state', JSON.stringify(importedProjects));
+          localStorage.setItem('nexus-active-project', newActiveId);
+          // Save all imported projects to cloud
+          importedProjects.forEach(p => {
+            saveToCloud(p.id, { name: p.name, password: p.password, workspaces: p.workspaces, activeTab: p.activeTab, nextId: p.nextId });
+          });
+        } else if (importedData.workspaces && Array.isArray(importedData.workspaces)) {
+          // Legacy single-workspace format - import into active project
+          takeSnapshot();
+          const importedWorkspaces = importedData.workspaces.map(ws => {
+            const grps = ws.groups || [];
+            const nds = ws.nodes || [];
+            return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+          });
+          setWorkspaces(importedWorkspaces);
+          setActiveTab(importedData.activeTab || importedWorkspaces[0]?.id || '');
           setNextId(importedData.nextId || 10);
         } else {
           setErrorMessage("Invalid workflow file format.");
@@ -3094,6 +3342,22 @@ export default function WorkflowApp() {
             backgroundSize: `${24 * transform.scale}px ${24 * transform.scale}px`,
             backgroundPosition: `${transform.x}px ${transform.y}px`
           }} />
+
+          {/* --- Connection Status Indicator --- */}
+          {supabase && (
+            <div className="absolute top-3 right-3 z-50 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm rounded-full px-2.5 py-1 shadow-sm border border-slate-200/80 text-xs font-medium text-slate-600">
+              <div className={`w-2 h-2 rounded-full ${
+                syncStatus === 'connected' ? 'bg-emerald-500' :
+                syncStatus === 'syncing' ? 'bg-amber-400 animate-pulse' :
+                'bg-red-400'
+              }`} />
+              <span className="hidden sm:inline">{
+                syncStatus === 'connected' ? 'Synced' :
+                syncStatus === 'syncing' ? 'Syncing' :
+                'Offline'
+              }</span>
+            </div>
+          )}
 
           {/* Canvas View Transform Layer */}
           <div 
