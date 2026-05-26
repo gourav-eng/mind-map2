@@ -507,12 +507,105 @@ export default function WorkflowApp() {
   // --- Initialization & Auto-Save ---
   useEffect(() => {
     const init = async () => {
-      const cloudData = await loadFromCloud()
+      try {
+        // Try cloud first
+        const cloudData = await loadFromCloud()
 
-      if (cloudData) {
-        setWorkspaces(cloudData.workspaces || [])
+        if (cloudData && cloudData.workspaces && cloudData.workspaces.length > 0) {
+          let initialWorkspaces = cloudData.workspaces.map(ws => {
+            const grps = ws.groups || [];
+            const nds = ws.nodes || [];
+            return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+          });
+          setWorkspaces(initialWorkspaces);
+          setActiveTab(initialWorkspaces[0]?.id || '');
+          setInitialized(true);
+          return;
+        }
+      } catch (e) {
+        console.log('Cloud load failed, falling back to localStorage:', e);
       }
 
+      // Fallback to localStorage
+      try {
+        const savedAppState = localStorage.getItem('nexus-app-state');
+        const savedActiveProject = localStorage.getItem('nexus-active-project');
+
+        if (savedAppState) {
+          const parsedProjects = JSON.parse(savedAppState);
+          if (parsedProjects && Array.isArray(parsedProjects) && parsedProjects.length > 0) {
+            let needsSave = false;
+            const migratedProjects = await Promise.all(parsedProjects.map(async (p) => {
+              if (p.password && !/^[a-f0-9]{64}$/.test(p.password)) {
+                needsSave = true;
+                return { ...p, password: await hashPassword(p.password) };
+              }
+              return p;
+            }));
+            if (needsSave) {
+              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
+            }
+
+            setProjects(migratedProjects);
+            const activeId = savedActiveProject || migratedProjects[0].id;
+            setActiveProjectId(activeId);
+            const activeProj = migratedProjects.find(p => p.id === activeId) || migratedProjects[0];
+            
+            let initialWorkspaces = activeProj.workspaces || defaultWorkspaces;
+            initialWorkspaces = initialWorkspaces.map(ws => {
+              const grps = ws.groups || [];
+              const nds = ws.nodes || [];
+              return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+            });
+            
+            setWorkspaces(initialWorkspaces);
+            setActiveTab(activeProj.activeTab || (initialWorkspaces.length > 0 ? initialWorkspaces[0].id : ''));
+            setNextId(activeProj.nextId || 10);
+            
+            const isDefaultProject = activeProj.id === migratedProjects[0].id;
+            if (!isDefaultProject && activeProj.password) {
+              setPasswordEnabled(true);
+              setStoredPassword(activeProj.password);
+            }
+            if (migratedProjects[0].password) {
+              migratedProjects[0] = { ...migratedProjects[0], password: '' };
+              localStorage.setItem('nexus-app-state', JSON.stringify(migratedProjects));
+            }
+          }
+        } else {
+          // No saved state at all - use defaults
+          const defaultProject = {
+            id: 'proj-default',
+            name: 'Default',
+            password: '',
+            workspaces: defaultWorkspaces,
+            activeTab: 'ws-1',
+            nextId: 10
+          };
+          setProjects([defaultProject]);
+          setActiveProjectId('proj-default');
+          setWorkspaces(defaultWorkspaces);
+          setActiveTab('ws-1');
+          setNextId(10);
+          localStorage.setItem('nexus-app-state', JSON.stringify([defaultProject]));
+          localStorage.setItem('nexus-active-project', 'proj-default');
+        }
+      } catch (e) {
+        // Complete fallback to defaults
+        const defaultProject = {
+          id: 'proj-default',
+          name: 'Default',
+          password: '',
+          workspaces: defaultWorkspaces,
+          activeTab: 'ws-1',
+          nextId: 10
+        };
+        setProjects([defaultProject]);
+        setActiveProjectId('proj-default');
+        setWorkspaces(defaultWorkspaces);
+        setActiveTab('ws-1');
+        setNextId(10);
+      }
       setInitialized(true);
     };
     init();
