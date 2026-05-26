@@ -6,7 +6,7 @@ import {
   Sparkles, CheckSquare, Clock, AlertCircle, BarChart2, PanelLeftClose, PanelLeft,
   Grid, Move, Copy, ArrowUp, ArrowDown, RefreshCw, LayoutList, MonitorSpeaker,
   MoreVertical, ImageIcon, ChevronUp, Scissors, ClipboardPaste, Minimize2, Maximize2,
-  Lock, Shield, Eye, EyeOff, GitBranch
+  Lock, Shield, Eye, EyeOff, GitBranch, Settings
 } from 'lucide-react';
 import supabase from './supabase'
 
@@ -352,12 +352,16 @@ export default function WorkflowApp() {
   const [projects, setProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState('');
   const [showProjectPanel, setShowProjectPanel] = useState(false);
-  const [projectPanelMode, setProjectPanelMode] = useState('main'); // main, create, switch, delete, changePassword
+  const [projectPanelMode, setProjectPanelMode] = useState('new'); // new, open, settings, export
   const [projectNameInput, setProjectNameInput] = useState('');
+  const [projectDescInput, setProjectDescInput] = useState('');
   const [projectPasswordInput, setProjectPasswordInput] = useState('');
   const [projectPasswordConfirm, setProjectPasswordConfirm] = useState('');
   const [projectError, setProjectError] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [showPasswordField, setShowPasswordField] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const logoTapRef = useRef({ count: 0, lastTap: 0 });
   const saveTimerRef = useRef(null);
   const projectsRef = useRef([]);
@@ -877,19 +881,23 @@ export default function WorkflowApp() {
     setFocusedNodeId(null);
   }, [activeTab]);
 
-  // --- Secret Keyboard Shortcuts (Ctrl+Shift+P toggle, Ctrl+Shift+/ boss key, Escape dismiss) ---
+  // --- Secret Keyboard Shortcuts (Ctrl+Shift+K toggle, Ctrl+Shift+/ boss key, Escape dismiss) ---
   useEffect(() => {
     const handleSecretKey = (e) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+      if (e.ctrlKey && e.shiftKey && e.key === 'K') {
         e.preventDefault();
         setShowProjectPanel(prev => {
           if (prev) return false;
-          setProjectPanelMode('main');
+          setProjectPanelMode('new');
           setProjectError('');
           setProjectNameInput('');
+          setProjectDescInput('');
           setProjectPasswordInput('');
           setProjectPasswordConfirm('');
           setSelectedProjectId(null);
+          setShowPasswordField(false);
+          setImportPreview(null);
+          setDeleteConfirm(false);
           return true;
         });
       }
@@ -1324,12 +1332,16 @@ export default function WorkflowApp() {
   // --- Project Management Functions ---
   const openProjectPanel = () => {
     setShowProjectPanel(true);
-    setProjectPanelMode('main');
+    setProjectPanelMode('new');
     setProjectError('');
     setProjectNameInput('');
+    setProjectDescInput('');
     setProjectPasswordInput('');
     setProjectPasswordConfirm('');
     setSelectedProjectId(null);
+    setShowPasswordField(false);
+    setImportPreview(null);
+    setDeleteConfirm(false);
   };
 
   const handleLogoTap = () => {
@@ -1375,9 +1387,11 @@ export default function WorkflowApp() {
     // Immediately save new project to cloud so other devices can see it
     saveToCloud(newProj.id, { name: newProj.name, password: newProj.password, workspaces: newProj.workspaces, activeTab: newProj.activeTab, nextId: newProj.nextId });
     setProjectError('');
-    setProjectPanelMode('main');
+    setProjectPanelMode('open');
     setProjectNameInput('');
+    setProjectDescInput('');
     setProjectPasswordInput('');
+    setShowPasswordField(false);
   };
 
   const switchProject = async (targetId) => {
@@ -2739,241 +2753,250 @@ export default function WorkflowApp() {
     </div>
   );
 
+  const panelImportRef = useRef(null);
+
+  const handlePanelImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const importedData = JSON.parse(event.target.result);
+        if (importedData.version === 2 && importedData.projects && Array.isArray(importedData.projects)) {
+          setImportPreview({ type: 'multi', count: importedData.projects.length, names: importedData.projects.map(p => p.name), data: importedData });
+        } else if (importedData.workspaces && Array.isArray(importedData.workspaces)) {
+          setImportPreview({ type: 'legacy', count: importedData.workspaces.length, names: ['Current workspace (legacy format)'], data: importedData });
+        } else {
+          setProjectError('Invalid file format.');
+        }
+      } catch (err) {
+        setProjectError('Failed to read file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null;
+  };
+
+  const confirmImport = () => {
+    if (!importPreview) return;
+    if (importPreview.type === 'multi') {
+      takeSnapshot();
+      const importedData = importPreview.data;
+      const importedProjects = importedData.projects.map(p => ({
+        ...p,
+        workspaces: (p.workspaces || []).map(ws => {
+          const grps = ws.groups || [];
+          const nds = ws.nodes || [];
+          return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+        })
+      }));
+      setProjects(importedProjects);
+      const newActiveId = importedProjects[0]?.id || '';
+      setActiveProjectId(newActiveId);
+      const activeProj = importedProjects[0];
+      if (activeProj) {
+        setWorkspaces(activeProj.workspaces || defaultWorkspaces);
+        setActiveTab(activeProj.activeTab || (activeProj.workspaces?.[0]?.id || ''));
+        setNextId(activeProj.nextId || 10);
+        setStoredPassword(activeProj.password || '');
+        setPasswordEnabled(!!activeProj.password);
+      }
+      localStorage.setItem('nexus-app-state', JSON.stringify(importedProjects));
+      localStorage.setItem('nexus-active-project', newActiveId);
+      importedProjects.forEach(p => {
+        saveToCloud(p.id, { name: p.name, password: p.password, workspaces: p.workspaces, activeTab: p.activeTab, nextId: p.nextId });
+      });
+    } else if (importPreview.type === 'legacy') {
+      takeSnapshot();
+      const importedData = importPreview.data;
+      const importedWorkspaces = importedData.workspaces.map(ws => {
+        const grps = ws.groups || [];
+        const nds = ws.nodes || [];
+        return { ...ws, groups: computeLayout(grps, nds), nodes: nds, edges: ws.edges || [] };
+      });
+      setWorkspaces(importedWorkspaces);
+      setActiveTab(importedData.activeTab || importedWorkspaces[0]?.id || '');
+      setNextId(importedData.nextId || 10);
+    }
+    setImportPreview(null);
+    setShowProjectPanel(false);
+  };
+
   const renderProjectPanel = (isGate = false) => {
     const zBg = isGate ? 'z-[10000]' : 'z-[9998]';
     const zContent = isGate ? 'z-[10001]' : 'z-[9999]';
+    const activeProject = projects.find(p => p.id === activeProjectId);
+    const isDefaultProject = activeProject && projects.indexOf(activeProject) === 0;
+    const showSettingsTab = !isGate && !isDefaultProject;
+    const effectiveMode = isGate ? 'open' : projectPanelMode;
+    const tabs = [
+      ...(!isGate ? [{ id: 'new', label: 'New Project', icon: Plus }] : []),
+      { id: 'open', label: 'Open Project', icon: FolderOpen },
+      ...(showSettingsTab ? [{ id: 'settings', label: 'Settings', icon: Settings }] : []),
+      ...(!isGate ? [{ id: 'export', label: 'Export / Import', icon: Download }] : []),
+    ];
     return (
       <>
-        <div className={`fixed inset-0 ${zBg} bg-slate-900/40 backdrop-blur-sm`} onClick={() => setShowProjectPanel(false)} />
+        <div className={`fixed inset-0 ${zBg} bg-slate-900/60 backdrop-blur-md transition-opacity duration-200`} onClick={() => !isGate && setShowProjectPanel(false)} />
         <div className={`fixed inset-0 ${zContent} flex items-center justify-center pointer-events-none`}>
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 w-full max-w-xs mx-4 pointer-events-auto" onKeyDown={(e) => { if (e.key === 'Escape') setShowProjectPanel(false); }}>
-            
-            {projectPanelMode === 'main' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-center mb-2">
-                  <Lock className="w-5 h-5 text-slate-400" />
-                </div>
-                {!isGate && (
-                  <button onClick={() => { setProjectPanelMode('create'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
-                    New
-                  </button>
-                )}
-                {projects.length > 1 && (
-                  <button onClick={() => { setProjectPanelMode('switch'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
-                    Switch
-                  </button>
-                )}
-                {!isGate && projects.length > 1 && (
-                  <button onClick={() => { setProjectPanelMode('delete'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors">
-                    Remove
-                  </button>
-                )}
-                {!isGate && projects.indexOf(projects.find(p => p.id === activeProjectId)) !== 0 && (
-                  <button onClick={() => { setProjectPanelMode('changePassword'); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
-                    Change Key
-                  </button>
-                )}
-                <button onClick={() => setShowProjectPanel(false)} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                  Cancel
-                </button>
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl mx-4 pointer-events-auto flex overflow-hidden transition-all duration-200" style={{ minHeight: '420px', maxHeight: '80vh' }} onKeyDown={(e) => { if (e.key === 'Escape' && !isGate) setShowProjectPanel(false); }}>
+            {/* Left Sidebar */}
+            <div className="w-48 bg-slate-50 border-r border-slate-200 flex flex-col py-4 shrink-0">
+              <div className="px-4 mb-4">
+                <h2 className="text-sm font-bold text-slate-800 tracking-tight">Projects</h2>
               </div>
-            )}
-
-            {!isGate && projectPanelMode === 'create' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-center mb-2">
-                  <Lock className="w-5 h-5 text-slate-400" />
-                </div>
-                <input
-                  type="text"
-                  value={projectNameInput}
-                  onChange={(e) => setProjectNameInput(e.target.value)}
-                  placeholder="Name"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  autoFocus
-                />
-                <input
-                  type="password"
-                  value={projectPasswordInput}
-                  onChange={(e) => setProjectPasswordInput(e.target.value)}
-                  placeholder="Key"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                <button onClick={createProject} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                  Confirm
-                </button>
-                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                  Back
-                </button>
+              <nav className="flex-1 px-2 space-y-0.5">
+                {tabs.map(tab => (
+                  <button key={tab.id} onClick={() => { setProjectPanelMode(tab.id); setProjectError(''); setSelectedProjectId(null); setDeleteConfirm(false); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-150 ${effectiveMode === tab.id ? 'bg-indigo-50 text-indigo-700 shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}>
+                    <tab.icon className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{tab.label}</span>
+                  </button>
+                ))}
+              </nav>
+            </div>
+            {/* Right Content */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <h3 className="text-base font-semibold text-slate-800">{tabs.find(t => t.id === effectiveMode)?.label || 'Projects'}</h3>
+                {!isGate && (<button onClick={() => setShowProjectPanel(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"><X className="w-4 h-4" /></button>)}
               </div>
-            )}
+              <div className="flex-1 overflow-y-auto px-6 py-5">
 
-            {projectPanelMode === 'switch' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-center mb-2">
-                  <Lock className="w-5 h-5 text-slate-400" />
-                </div>
-                {isGate ? (
-                  <>
-                    {!selectedProjectId ? (
-                      <div className="space-y-2">
-                        {projects.filter(p => p.id !== activeProjectId).map(p => {
-                          const isDefault = projects.indexOf(p) === 0;
-                          return (
-                            <button key={p.id} onClick={() => {
-                              if (isDefault) {
-                                cycleToProject(p.id);
-                              } else {
-                                setSelectedProjectId(p.id);
-                                setProjectPasswordInput('');
-                                setProjectError('');
-                              }
-                            }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left flex items-center justify-between">
-                              <span>{p.name}</span>
-                              {isDefault && <span className="text-[10px] text-slate-400 ml-2">*</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <input
-                          type="password"
-                          value={projectPasswordInput}
-                          onChange={(e) => setProjectPasswordInput(e.target.value)}
-                          placeholder="Enter key"
-                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          autoFocus
-                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
-                        />
-                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                          Confirm
-                        </button>
-                        <button onClick={() => { setSelectedProjectId(null); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                          Back
+                {/* New Project Tab */}
+                {effectiveMode === 'new' && !isGate && (
+                  <div className="space-y-4 transition-opacity duration-200">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Project Name</label>
+                      <input type="text" value={projectNameInput} onChange={(e) => setProjectNameInput(e.target.value)} placeholder="Enter project name..." className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow" autoFocus />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                      <textarea value={projectDescInput} onChange={(e) => setProjectDescInput(e.target.value)} placeholder="Brief description of this project..." rows={2} className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow resize-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Password / Key</label>
+                      <div className="relative">
+                        <input type={showPasswordField ? 'text' : 'password'} value={projectPasswordInput} onChange={(e) => setProjectPasswordInput(e.target.value)} placeholder="Enter a secure password..." className="w-full px-3.5 py-2.5 pr-10 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow" />
+                        <button type="button" onClick={() => setShowPasswordField(!showPasswordField)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                          {showPasswordField ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-2">
-                    {!selectedProjectId ? (
-                      projects.filter(p => p.id !== activeProjectId).map((p, _, arr) => {
-                        const isDefault = projects.indexOf(p) === 0;
+                    </div>
+                    {projectError && <p className="text-sm text-red-500">{projectError}</p>}
+                    <button onClick={createProject} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">Create Project</button>
+                  </div>
+                )}
+
+                {/* Open Project Tab */}
+                {effectiveMode === 'open' && (
+                  <div className="transition-opacity duration-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {projects.map((p, idx) => {
+                        const isDefault = idx === 0;
+                        const isActive = p.id === activeProjectId;
+                        const isSelected = selectedProjectId === p.id;
+                        const wsCount = p.id === activeProjectId ? workspaces.length : (p.workspaces?.length || 0);
                         return (
-                          <button key={p.id} onClick={() => {
-                            if (isDefault) {
-                              cycleToProject(p.id);
-                            } else {
-                              setSelectedProjectId(p.id);
-                              setProjectPasswordInput('');
-                              setProjectError('');
-                            }
-                          }} className="w-full py-2.5 px-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors text-left flex items-center justify-between">
-                            <span>{p.name}</span>
-                            {isDefault && <span className="text-[10px] text-slate-400 ml-2">*</span>}
-                          </button>
+                          <div key={p.id} className={`relative p-4 rounded-xl border-2 transition-all duration-150 cursor-pointer ${isActive ? 'border-indigo-300 bg-indigo-50/50 ring-2 ring-indigo-100' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'}`} onClick={() => { if (isActive && !isGate) return; if (isDefault) { cycleToProject(p.id); } else { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); } }}>
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-green-400' : 'bg-slate-300'}`} />
+                                <span className="text-sm font-bold text-slate-800 truncate">{p.name}</span>
+                              </div>
+                              {isDefault && (<span className="text-[10px] font-medium bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">Default</span>)}
+                            </div>
+                            <div className="text-xs text-slate-500">{wsCount} workspace{wsCount !== 1 ? 's' : ''}</div>
+                            {isSelected && !isDefault && (
+                              <div className="mt-3 pt-3 border-t border-slate-200" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex gap-2">
+                                  <input type="password" value={projectPasswordInput} onChange={(e) => setProjectPasswordInput(e.target.value)} placeholder="Enter key..." className="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') switchProject(p.id); }} />
+                                  <button onClick={() => switchProject(p.id)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-lg transition-colors">Open</button>
+                                </div>
+                                {projectError && <p className="text-xs text-red-500 mt-1.5">{projectError}</p>}
+                              </div>
+                            )}
+                          </div>
                         );
-                      })
-                    ) : (
-                      <div className="space-y-3">
-                        <input
-                          type="password"
-                          value={projectPasswordInput}
-                          onChange={(e) => setProjectPasswordInput(e.target.value)}
-                          placeholder="Enter key"
-                          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          autoFocus
-                          onKeyDown={(e) => { if (e.key === 'Enter') switchProject(selectedProjectId); }}
-                        />
-                        {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                        <button onClick={() => switchProject(selectedProjectId)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                          Confirm
-                        </button>
-                        <button onClick={() => { setSelectedProjectId(null); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                          Back
-                        </button>
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Settings Tab */}
+                {effectiveMode === 'settings' && !isGate && showSettingsTab && (
+                  <div className="space-y-6 transition-opacity duration-200">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-800 mb-3">Rename Project</h4>
+                      <div className="flex gap-2">
+                        <input type="text" value={projectNameInput || activeProject?.name || ''} onChange={(e) => setProjectNameInput(e.target.value)} placeholder="New project name..." className="flex-1 px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow" />
+                        <button onClick={() => { if (!projectNameInput.trim()) { setProjectError('Name required.'); return; } const nameExists = projects.some(p => p.id !== activeProjectId && p.name.toLowerCase() === projectNameInput.trim().toLowerCase()); if (nameExists) { setProjectError('Name already in use.'); return; } setProjects(prev => { const updated = prev.map(p => p.id === activeProjectId ? { ...p, name: projectNameInput.trim() } : p); localStorage.setItem('nexus-app-state', JSON.stringify(updated)); return updated; }); setProjectError(''); setProjectNameInput(''); }} className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">Save</button>
                       </div>
-                    )}
+                    </div>
+                    <div className="border-t border-slate-100" />
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-800 mb-3">Change Password</h4>
+                      <div className="space-y-2">
+                        {activeProject?.password && (<input type="password" value={projectPasswordInput} onChange={(e) => setProjectPasswordInput(e.target.value)} placeholder="Current password..." className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow" />)}
+                        <input type="password" value={projectPasswordConfirm} onChange={(e) => setProjectPasswordConfirm(e.target.value)} placeholder="New password..." className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow" />
+                        <button onClick={changeProjectPassword} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">Update Password</button>
+                      </div>
+                    </div>
+                    <div className="border-t border-slate-100" />
+                    <div>
+                      <h4 className="text-sm font-semibold text-red-700 mb-3">Delete Project</h4>
+                      {!deleteConfirm ? (
+                        <button onClick={() => setDeleteConfirm(true)} className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-lg border border-red-200 transition-colors">Delete This Project</button>
+                      ) : (
+                        <div className="space-y-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                          <p className="text-xs text-red-600 font-medium">Are you sure? This cannot be undone.</p>
+                          <input type="password" value={projectPasswordInput} onChange={(e) => setProjectPasswordInput(e.target.value)} placeholder="Enter password to confirm..." className="w-full px-3 py-2 border border-red-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') deleteProject(activeProjectId); }} />
+                          <div className="flex gap-2">
+                            <button onClick={() => deleteProject(activeProjectId)} className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">Confirm Delete</button>
+                            <button onClick={() => { setDeleteConfirm(false); setProjectPasswordInput(''); }} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {projectError && <p className="text-sm text-red-500">{projectError}</p>}
                   </div>
                 )}
-                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                  Back
-                </button>
-              </div>
-            )}
 
-            {!isGate && projectPanelMode === 'delete' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-center mb-2">
-                  <Lock className="w-5 h-5 text-red-400" />
-                </div>
-                {!selectedProjectId ? (
-                  <div className="space-y-2">
-                    {projects.filter(p => (p.id !== activeProjectId || projects.length > 1) && projects.indexOf(p) !== 0).map(p => (
-                      <button key={p.id} onClick={() => { setSelectedProjectId(p.id); setProjectPasswordInput(''); setProjectError(''); }} className="w-full py-2.5 px-3 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors text-left">
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-xs text-slate-500 text-center">Confirm removal</p>
-                    <input
-                      type="password"
-                      value={projectPasswordInput}
-                      onChange={(e) => setProjectPasswordInput(e.target.value)}
-                      placeholder="Enter key to confirm"
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                      autoFocus
-                      onKeyDown={(e) => { if (e.key === 'Enter') deleteProject(selectedProjectId); }}
-                    />
-                    {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                    <button onClick={() => deleteProject(selectedProjectId)} className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                      Remove
-                    </button>
+                {/* Export / Import Tab */}
+                {effectiveMode === 'export' && !isGate && (
+                  <div className="space-y-6 transition-opacity duration-200">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-800 mb-2">Export All Projects</h4>
+                      <p className="text-xs text-slate-500 mb-3">Exports all projects as a single JSON file including workspaces, nodes, edges, and settings.</p>
+                      <button onClick={exportData} className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"><Download className="w-4 h-4" />Download Export File</button>
+                    </div>
+                    <div className="border-t border-slate-100" />
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-800 mb-2">Import Projects</h4>
+                      <p className="text-xs text-slate-500 mb-3">Import a previously exported JSON file. Supports both multi-project and legacy single-workspace formats.</p>
+                      <input type="file" accept=".json" ref={panelImportRef} onChange={handlePanelImport} className="hidden" />
+                      {!importPreview ? (
+                        <button onClick={() => panelImportRef.current?.click()} className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg border border-slate-200 transition-colors"><Upload className="w-4 h-4" />Choose File to Import</button>
+                      ) : (
+                        <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                          <div>
+                            <p className="text-xs font-medium text-slate-700 mb-1">{importPreview.type === 'multi' ? `${importPreview.count} project${importPreview.count !== 1 ? 's' : ''} found:` : 'Legacy format detected:'}</p>
+                            <ul className="text-xs text-slate-500 space-y-0.5">
+                              {importPreview.names.map((name, i) => (<li key={i} className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />{name}</li>))}
+                            </ul>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={confirmImport} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-lg transition-colors">Confirm Import</button>
+                            <button onClick={() => setImportPreview(null)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg transition-colors">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {projectError && <p className="text-sm text-red-500 mt-3">{projectError}</p>}
                   </div>
                 )}
-                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); setSelectedProjectId(null); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                  Back
-                </button>
-              </div>
-            )}
 
-            {!isGate && projectPanelMode === 'changePassword' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-center mb-2">
-                  <Lock className="w-5 h-5 text-slate-400" />
-                </div>
-                {(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })() && (
-                  <input
-                    type="password"
-                    value={projectPasswordInput}
-                    onChange={(e) => setProjectPasswordInput(e.target.value)}
-                    placeholder="Current key"
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    autoFocus
-                  />
-                )}
-                <input
-                  type="password"
-                  value={projectPasswordConfirm}
-                  onChange={(e) => setProjectPasswordConfirm(e.target.value)}
-                  placeholder="New key"
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  autoFocus={!(() => { const current = projects.find(p => p.id === activeProjectId); return current && current.password; })()}
-                />
-                {projectError && <p className="text-xs text-red-500">{projectError}</p>}
-                <button onClick={changeProjectPassword} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                  Update
-                </button>
-                <button onClick={() => { setProjectPanelMode('main'); setProjectError(''); }} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                  Back
-                </button>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </>
